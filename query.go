@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/hasura/go-graphql-client/types"
 	"io"
 	"reflect"
 	"sort"
@@ -136,16 +137,16 @@ func queryArguments(variables map[string]interface{}) string {
 // If value is true, then "!" is written at the end of t.
 func writeArgumentType(w io.Writer, t reflect.Type, v interface{}, value bool) {
 
-	if t.Implements(graphqlTypeInterface) {
-		var graphqlType GraphQLType
+	if t.Implements(types.GraphqlTypeInterface) {
+		var graphqlType types.GraphQLType
 		var ok bool
 		value = t.Kind() != reflect.Ptr
 		if v != nil {
-			graphqlType, ok = v.(GraphQLType)
+			graphqlType, ok = v.(types.GraphQLType)
 		} else if t.Kind() == reflect.Ptr {
-			graphqlType, ok = reflect.New(t.Elem()).Interface().(GraphQLType)
+			graphqlType, ok = reflect.New(t.Elem()).Interface().(types.GraphQLType)
 		} else {
-			graphqlType, ok = reflect.Zero(t).Interface().(GraphQLType)
+			graphqlType, ok = reflect.Zero(t).Interface().(types.GraphQLType)
 		}
 		if ok {
 			io.WriteString(w, graphqlType.GetGraphQLType())
@@ -226,7 +227,19 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 		iter := 0
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
-			value, ok := f.Tag.Lookup("graphql")
+			value := ""
+			ok := false
+			if f.Type.Implements(types.GraphqlTypeInterface) {
+				graphqlType, typeok := v.Field(i).Interface().(types.GraphQLType)
+				if typeok {
+					value = graphqlType.GetGraphQLType()
+					ok = true
+				}
+			}
+
+			if !ok {
+				value, ok = f.Tag.Lookup("graphql")
+			}
 			// Skip this field if the tag value is hyphen
 			if value == "-" {
 				continue
@@ -316,7 +329,6 @@ func FieldSafe(valStruct reflect.Value, i int) reflect.Value {
 
 var jsonUnmarshaler = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 var idType = reflect.TypeOf(ID(""))
-var graphqlTypeInterface = reflect.TypeOf((*GraphQLType)(nil)).Elem()
 
 func isTrue(s string) bool {
 	b, _ := strconv.ParseBool(s)

@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"fmt"
+	"github.com/hasura/go-graphql-client/types"
 	"net/url"
 	"strings"
 	"testing"
@@ -768,7 +769,7 @@ func (s stringStringer) String() string { return string(s) }
 
 type supportedType fmt.Stringer
 
-func newCustomTypeHint(data supportedType, hintType string) GraphQLType {
+func newCustomTypeHint(data supportedType, hintType string) types.GraphQLType {
 	return &customTypeHint{
 		data: data,
 		hint: hintType,

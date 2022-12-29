@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hasura/go-graphql-client/types"
 	"io"
 	"reflect"
 	"strconv"
@@ -372,7 +373,7 @@ func fieldByGraphQLName(v reflect.Value, name string) (val reflect.Value, tagged
 			// Skip unexported field.
 			continue
 		}
-		if hasGraphQLName(v.Type().Field(i), name) {
+		if hasGraphQLName(v.Type().Field(i), v.Field(i), name) {
 			return v.Field(i), hasScalarTag(v.Type().Field(i))
 		}
 	}
@@ -402,8 +403,19 @@ func isTrue(s string) bool {
 }
 
 // hasGraphQLName reports whether struct field f has GraphQL name.
-func hasGraphQLName(f reflect.StructField, name string) bool {
-	value, ok := f.Tag.Lookup("graphql")
+func hasGraphQLName(f reflect.StructField, v reflect.Value, name string) bool {
+	value := ""
+	ok := false
+	if f.Type.Implements(types.GraphqlTypeInterface) {
+		graphqlType, typeok := v.Interface().(types.GraphQLType)
+		if typeok {
+			value = graphqlType.GetGraphQLType()
+			ok = true
+		}
+	}
+	if !ok {
+		value, ok = f.Tag.Lookup("graphql")
+	}
 	if !ok {
 		// TODO: caseconv package is relatively slow. Optimize it, then consider using it here.
 		//return caseconv.MixedCapsToLowerCamelCase(f.Name) == name

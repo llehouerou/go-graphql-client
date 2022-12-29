@@ -1,4 +1,6 @@
-package graphql
+package types
+
+import "reflect"
 
 // GraphQLType interface is used to specify the GraphQL type associated
 // with a particular type. If a type implements this interface, the name of
@@ -13,3 +15,5 @@ package graphql
 type GraphQLType interface {
 	GetGraphQLType() string
 }
+
+var GraphqlTypeInterface = reflect.TypeOf((*GraphQLType)(nil)).Elem()
