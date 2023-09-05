@@ -1,7 +1,7 @@
 go-graphql-client
 =======
 
-[![Unit tests](https://github.com/hasura/go-graphql-client/actions/workflows/test.yml/badge.svg)](https://github.com/hasura/go-graphql-client/actions/workflows/test.yml)
+[![Unit tests](https://github.com/llehouerou/go-graphql-client/actions/workflows/test.yml/badge.svg)](https://github.com/llehouerou/go-graphql-client/actions/workflows/test.yml)
 
 **Preface:** This is a fork of `https://github.com/shurcooL/graphql` with extended features (subscription client, named operation)
 
@@ -51,7 +51,7 @@ For more information, see package [`github.com/shurcooL/githubv4`](https://githu
 `go-graphql-client` requires Go version 1.16 or later. For older Go versions, downgrade the library version below v0.7.1.
 
 ```bash
-go get -u github.com/hasura/go-graphql-client
+go get -u github.com/llehouerou/go-graphql-client
 ```
 
 ## Usage
@@ -82,7 +82,7 @@ func main() {
 
 ### Simple Query
 
-To make a GraphQL query, you need to define a corresponding Go type. Variable names must be upper case, see [here](https://github.com/hasura/go-graphql-client/blob/master/README.md#specify-graphql-type-name)
+To make a GraphQL query, you need to define a corresponding Go type. Variable names must be upper case, see [here](https://github.com/llehouerou/go-graphql-client/blob/master/README.md#specify-graphql-type-name)
 
 For example, to make the following GraphQL query:
 
@@ -488,7 +488,7 @@ subscriptionId, err := client.Subscribe(&query, nil, func(dataValue []byte, errV
 		return nil
 	}
 	data := query{}
-	// use the github.com/hasura/go-graphql-client/pkg/jsonutil package
+	// use the github.com/llehouerou/go-graphql-client/pkg/jsonutil package
 	err := jsonutil.UnmarshalGraphQL(dataValue, &data)
 
 	fmt.Println(query.Me.Name)

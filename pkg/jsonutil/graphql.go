@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hasura/go-graphql-client/types"
 	"io"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/llehouerou/go-graphql-client/types"
 )
 
 // UnmarshalGraphQL parses the JSON-encoded GraphQL response data and stores

@@ -2,11 +2,12 @@ package graphql
 
 import (
 	"fmt"
-	"github.com/hasura/go-graphql-client/types"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/llehouerou/go-graphql-client/types"
 
 	"github.com/google/uuid"
 )

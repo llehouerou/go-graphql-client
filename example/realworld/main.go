@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 
-	graphql "github.com/hasura/go-graphql-client"
+	graphql "github.com/llehouerou/go-graphql-client"
 )
 
 func main() {

@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/hasura/go-graphql-client/types"
 	"io"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/hasura/go-graphql-client/ident"
+	"github.com/llehouerou/go-graphql-client/types"
+
+	"github.com/llehouerou/go-graphql-client/ident"
 )
 
 type constructOptionsOutput struct {
