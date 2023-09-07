@@ -46,7 +46,7 @@ func constructOptions(options []Option) (*constructOptionsOutput, error) {
 }
 
 // ConstructQuery build GraphQL query string from struct and variables
-func ConstructQuery(v interface{}, variables map[string]interface{}, options ...Option) (string, error) {
+func ConstructQuery(v interface{}, variables interface{}, options ...Option) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -57,8 +57,11 @@ func ConstructQuery(v interface{}, variables map[string]interface{}, options ...
 		return "", err
 	}
 
-	if len(variables) > 0 {
-		return fmt.Sprintf("query %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+	if variables != nil {
+		reflectVal := reflect.ValueOf(variables)
+		if reflectVal.Kind() != reflect.Map || (reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
+			return fmt.Sprintf("query %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+		}
 	}
 
 	if optionsOutput.operationName == "" && len(optionsOutput.operationDirectives) == 0 {
@@ -69,7 +72,7 @@ func ConstructQuery(v interface{}, variables map[string]interface{}, options ...
 }
 
 // ConstructQuery build GraphQL mutation string from struct and variables
-func ConstructMutation(v interface{}, variables map[string]interface{}, options ...Option) (string, error) {
+func ConstructMutation(v interface{}, variables interface{}, options ...Option) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -78,8 +81,11 @@ func ConstructMutation(v interface{}, variables map[string]interface{}, options 
 	if err != nil {
 		return "", err
 	}
-	if len(variables) > 0 {
-		return fmt.Sprintf("mutation %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+	if variables != nil {
+		reflectVal := reflect.ValueOf(variables)
+		if reflectVal.Kind() != reflect.Map || (reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
+			return fmt.Sprintf("mutation %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+		}
 	}
 
 	if optionsOutput.operationName == "" && len(optionsOutput.operationDirectives) == 0 {
@@ -90,7 +96,7 @@ func ConstructMutation(v interface{}, variables map[string]interface{}, options 
 }
 
 // ConstructSubscription build GraphQL subscription string from struct and variables
-func ConstructSubscription(v interface{}, variables map[string]interface{}, options ...Option) (string, error) {
+func ConstructSubscription(v interface{}, variables interface{}, options ...Option) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -99,8 +105,11 @@ func ConstructSubscription(v interface{}, variables map[string]interface{}, opti
 	if err != nil {
 		return "", err
 	}
-	if len(variables) > 0 {
-		return fmt.Sprintf("subscription %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+	if variables != nil {
+		reflectVal := reflect.ValueOf(variables)
+		if reflectVal.Kind() != reflect.Map || (reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
+			return fmt.Sprintf("subscription %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+		}
 	}
 	if optionsOutput.operationName == "" && len(optionsOutput.operationDirectives) == 0 {
 		return "subscription" + query, nil
@@ -111,25 +120,61 @@ func ConstructSubscription(v interface{}, variables map[string]interface{}, opti
 // queryArguments constructs a minified arguments string for variables.
 //
 // E.g., map[string]interface{}{"a": int(123), "b": true} -> "$a:Int!$b:Boolean!".
-func queryArguments(variables map[string]interface{}) string {
-	// Sort keys in order to produce deterministic output for testing purposes.
-	// TODO: If tests can be made to work with non-deterministic output, then no need to sort.
-	keys := make([]string, 0, len(variables))
-	for k := range variables {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
+func queryArguments(variables interface{}) string {
+	var keys []string
 	var buf bytes.Buffer
-	for _, k := range keys {
-		io.WriteString(&buf, "$")
-		io.WriteString(&buf, k)
-		io.WriteString(&buf, ":")
-		writeArgumentType(&buf, reflect.TypeOf(variables[k]), variables[k], true)
-		// Don't insert a comma here.
-		// Commas in GraphQL are insignificant, and we want minified output.
-		// See https://facebook.github.io/graphql/October2016/#sec-Insignificant-Commas.
+
+	switch v := variables.(type) {
+	case map[string]interface{}:
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			io.WriteString(&buf, "$")
+			io.WriteString(&buf, k)
+			io.WriteString(&buf, ":")
+			writeArgumentType(&buf, reflect.TypeOf(v[k]), v[k], true)
+		}
+	default:
+		val := reflect.ValueOf(variables)
+		typ := reflect.TypeOf(variables)
+		if typ.Kind() == reflect.Ptr {
+			val = val.Elem()
+			typ = typ.Elem()
+		}
+		if typ.Kind() != reflect.Struct {
+			panic(fmt.Sprintf("variables must be a struct or a map; got %T", variables))
+		}
+		for i := 0; i < val.NumField(); i++ {
+			field := typ.Field(i)
+			jsonTag := field.Tag.Get("json")
+			if jsonTag == "" {
+				continue
+			}
+			jsonName := jsonTag
+			if commaIdx := bytes.IndexByte([]byte(jsonTag), ','); commaIdx > -1 {
+				jsonName = jsonTag[:commaIdx]
+			}
+			if field.PkgPath != "" {
+				continue
+			}
+			keys = append(keys, jsonName)
+		}
+		sort.Strings(keys)
+		for _, jsonName := range keys {
+			field, _ := typ.FieldByNameFunc(func(s string) bool {
+				field, _ := typ.FieldByName(s)
+				return field.Tag.Get("json") == jsonName
+			})
+			value := val.FieldByName(field.Name)
+			io.WriteString(&buf, "$")
+			io.WriteString(&buf, jsonName)
+			io.WriteString(&buf, ":")
+			writeArgumentType(&buf, field.Type, value.Interface(), true)
+		}
 	}
+
 	return buf.String()
 }
 

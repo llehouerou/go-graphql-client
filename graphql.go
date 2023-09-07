@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/llehouerou/go-graphql-client/pkg/jsonutil"
@@ -42,61 +43,35 @@ func NewClient(url string, httpClient *http.Client) *Client {
 // Query executes a single GraphQL query request,
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
-func (c *Client) Query(ctx context.Context, q interface{}, variables map[string]interface{}, options ...Option) error {
+func (c *Client) Query(ctx context.Context, q interface{}, variables interface{}, options ...Option) error {
 	return c.do(ctx, queryOperation, q, variables, options...)
-}
-
-// NamedQuery executes a single GraphQL query request, with operation name
-//
-// Deprecated: this is the shortcut of Query method, with NewOperationName option
-func (c *Client) NamedQuery(ctx context.Context, name string, q interface{}, variables map[string]interface{}, options ...Option) error {
-	return c.do(ctx, queryOperation, q, variables, append(options, OperationName(name))...)
 }
 
 // Mutate executes a single GraphQL mutation request,
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
-func (c *Client) Mutate(ctx context.Context, m interface{}, variables map[string]interface{}, options ...Option) error {
+func (c *Client) Mutate(ctx context.Context, m interface{}, variables interface{}, options ...Option) error {
 	return c.do(ctx, mutationOperation, m, variables, options...)
-}
-
-// NamedMutate executes a single GraphQL mutation request, with operation name
-//
-// Deprecated: this is the shortcut of Mutate method, with NewOperationName option
-func (c *Client) NamedMutate(ctx context.Context, name string, m interface{}, variables map[string]interface{}, options ...Option) error {
-	return c.do(ctx, mutationOperation, m, variables, append(options, OperationName(name))...)
 }
 
 // Query executes a single GraphQL query request,
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
 // return raw bytes message.
-func (c *Client) QueryRaw(ctx context.Context, q interface{}, variables map[string]interface{}, options ...Option) ([]byte, error) {
+func (c *Client) QueryRaw(ctx context.Context, q interface{}, variables interface{}, options ...Option) ([]byte, error) {
 	return c.doRaw(ctx, queryOperation, q, variables, options...)
-}
-
-// NamedQueryRaw executes a single GraphQL query request, with operation name
-// return raw bytes message.
-func (c *Client) NamedQueryRaw(ctx context.Context, name string, q interface{}, variables map[string]interface{}, options ...Option) ([]byte, error) {
-	return c.doRaw(ctx, queryOperation, q, variables, append(options, OperationName(name))...)
 }
 
 // MutateRaw executes a single GraphQL mutation request,
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
 // return raw bytes message.
-func (c *Client) MutateRaw(ctx context.Context, m interface{}, variables map[string]interface{}, options ...Option) ([]byte, error) {
+func (c *Client) MutateRaw(ctx context.Context, m interface{}, variables interface{}, options ...Option) ([]byte, error) {
 	return c.doRaw(ctx, mutationOperation, m, variables, options...)
 }
 
-// NamedMutateRaw executes a single GraphQL mutation request, with operation name
-// return raw bytes message.
-func (c *Client) NamedMutateRaw(ctx context.Context, name string, m interface{}, variables map[string]interface{}, options ...Option) ([]byte, error) {
-	return c.doRaw(ctx, mutationOperation, m, variables, append(options, OperationName(name))...)
-}
-
 // buildAndRequest the common method that builds and send graphql request
-func (c *Client) buildAndRequest(ctx context.Context, op operationType, v interface{}, variables map[string]interface{}, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
+func (c *Client) buildAndRequest(ctx context.Context, op operationType, v interface{}, variables interface{}, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
 	var query string
 	var err error
 	switch op {
@@ -114,10 +89,16 @@ func (c *Client) buildAndRequest(ctx context.Context, op operationType, v interf
 }
 
 // Request the common method that send graphql request
-func (c *Client) request(ctx context.Context, query string, variables map[string]interface{}, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
+func (c *Client) request(ctx context.Context, query string, variables interface{}, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
+	if variables != nil {
+		reflectVal := reflect.ValueOf(variables)
+		if reflectVal.Kind() == reflect.Map && reflectVal.Len() == 0 {
+			variables = nil
+		}
+	}
 	in := struct {
-		Query     string                 `json:"query"`
-		Variables map[string]interface{} `json:"variables,omitempty"`
+		Query     string      `json:"query"`
+		Variables interface{} `json:"variables,omitempty"`
 	}{
 		Query:     query,
 		Variables: variables,
@@ -212,7 +193,7 @@ func (c *Client) request(ctx context.Context, query string, variables map[string
 
 	var rawData []byte
 	if out.Data != nil && len(*out.Data) > 0 {
-		rawData = []byte(*out.Data)
+		rawData = *out.Data
 	}
 
 	if len(out.Errors) > 0 {
@@ -230,7 +211,7 @@ func (c *Client) request(ctx context.Context, query string, variables map[string
 
 // do executes a single GraphQL operation.
 // return raw message and error
-func (c *Client) doRaw(ctx context.Context, op operationType, v interface{}, variables map[string]interface{}, options ...Option) ([]byte, error) {
+func (c *Client) doRaw(ctx context.Context, op operationType, v interface{}, variables interface{}, options ...Option) ([]byte, error) {
 	data, _, _, err := c.buildAndRequest(ctx, op, v, variables, options...)
 	if len(err) > 0 {
 		return data, err
@@ -239,7 +220,7 @@ func (c *Client) doRaw(ctx context.Context, op operationType, v interface{}, var
 }
 
 // do executes a single GraphQL operation and unmarshal json.
-func (c *Client) do(ctx context.Context, op operationType, v interface{}, variables map[string]interface{}, options ...Option) error {
+func (c *Client) do(ctx context.Context, op operationType, v interface{}, variables interface{}, options ...Option) error {
 	data, resp, respBuf, errs := c.buildAndRequest(ctx, op, v, variables, options...)
 	return c.processResponse(v, data, resp, respBuf, errs)
 }
