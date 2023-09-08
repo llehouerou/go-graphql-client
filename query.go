@@ -317,6 +317,19 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			if isTrue(f.Tag.Get("scalar")) {
 				continue
 			}
+
+			if v.IsValid() {
+				method := v.Field(i).MethodByName("GetGraphQLWrapped")
+				if method.IsValid() {
+					wrapped := method.Call(nil)[0]
+					err := writeQuery(w, reflect.TypeOf(wrapped.Interface()), reflect.ValueOf(wrapped.Interface()), inlineField)
+					if err != nil {
+						return fmt.Errorf("failed to write query for struct field `%v`: %w", f.Name, err)
+					}
+					continue
+				}
+			}
+
 			err := writeQuery(w, f.Type, FieldSafe(v, i), inlineField)
 			if err != nil {
 				return fmt.Errorf("failed to write query for struct field `%v`: %w", f.Name, err)

@@ -17,3 +17,9 @@ type GraphQLType interface {
 }
 
 var GraphqlTypeInterface = reflect.TypeOf((*GraphQLType)(nil)).Elem()
+
+type GraphQLWrapper interface {
+	GetGraphQLWrapped() interface{}
+}
+
+var GraphqlWrapperInterface = reflect.TypeOf((*GraphQLWrapper)(nil)).Elem()

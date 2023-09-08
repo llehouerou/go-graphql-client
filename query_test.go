@@ -888,20 +888,20 @@ type AddReactionInput struct {
 	ClientMutationID *string `json:"clientMutationId,omitempty"`
 }
 
-type ActualNodes[T any, U ~[]T] struct {
+type ActualNodes[T any] struct {
 	gqlType string `graphql:"-"`
-	Nodes   U
+	Nodes   T
 }
 
-func (an *ActualNodes[T, U]) GetInnerLayer() ContainerLayer {
+func (an *ActualNodes[T]) GetInnerLayer() ContainerLayer {
 	return nil
 }
 
-func (an *ActualNodes[T, U]) GetNodes() interface{} {
+func (an *ActualNodes[T]) GetNodes() interface{} {
 	return an.Nodes
 }
 
-func (an *ActualNodes[T, U]) GetGraphQLType() string {
+func (an *ActualNodes[T]) GetGraphQLType() string {
 	return an.gqlType
 }
 
@@ -928,32 +928,33 @@ func (nl *NestedLayer) GetGraphQLType() string {
 	return nl.gqlType
 }
 
-type NestedQuery[T any, U ~[]T] struct {
+type NestedQuery[T any] struct {
 	OutermostLayer ContainerLayer
 }
 
-func (q *NestedQuery[T, U]) GetNodes() U {
+func (q *NestedQuery[T]) GetNodes() T {
 	if q.OutermostLayer == nil {
-		return nil
+		var res T
+		return res
 	}
 	layer := q.OutermostLayer
 	for layer.GetInnerLayer() != nil {
 		layer = layer.GetInnerLayer()
 	}
-	return layer.GetNodes().(U)
+	return layer.GetNodes().(T)
 }
 
-func NewNestedQuery[T any, U ~[]T](containerLayers ...string) *NestedQuery[T, U] {
+func NewNestedQuery[T any](containerLayers ...string) *NestedQuery[T] {
 	if len(containerLayers) == 0 {
-		return &NestedQuery[T, U]{
-			OutermostLayer: &ActualNodes[T, U]{},
+		return &NestedQuery[T]{
+			OutermostLayer: &ActualNodes[T]{},
 		}
 	}
 
 	var buildLayer func(index int) ContainerLayer
 	buildLayer = func(index int) ContainerLayer {
 		if index == len(containerLayers)-1 {
-			return &ActualNodes[T, U]{
+			return &ActualNodes[T]{
 				gqlType: containerLayers[index],
 			}
 		}
@@ -963,7 +964,7 @@ func NewNestedQuery[T any, U ~[]T](containerLayers ...string) *NestedQuery[T, U]
 		}
 	}
 
-	return &NestedQuery[T, U]{OutermostLayer: buildLayer(0)}
+	return &NestedQuery[T]{OutermostLayer: buildLayer(0)}
 }
 
 type Test struct {
@@ -980,8 +981,37 @@ func (t Tests) GetGraphQLType() string {
 	return "tests"
 }
 func TestInterface(t *testing.T) {
-	q := NewNestedQuery[Test, Tests]("testcontainer")
+	q := NewNestedQuery[Tests]("testcontainer")
 	want := `{testcontainer{tests{value}}}`
+	got, err := ConstructQuery(q, make(map[string]interface{}))
+	if err != nil {
+		t.Error(err)
+	} else if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+type Wrapped struct {
+	Value string `graphql:"value"`
+}
+
+type Wrappeds []Wrapped
+
+type Wrapper[T any] struct {
+	Wrapped T
+}
+
+func (w Wrapper[T]) GetGraphQLType() string {
+	return "wrapper"
+}
+
+func (w Wrapper[T]) GetGraphQLWrapped() T {
+	return w.Wrapped
+}
+
+func TestWrapper(t *testing.T) {
+	q := NewNestedQuery[Wrapper[Wrappeds]]("testcontainer")
+	want := `{testcontainer{wrapper{value}}}`
 	got, err := ConstructQuery(q, make(map[string]interface{}))
 	if err != nil {
 		t.Error(err)
