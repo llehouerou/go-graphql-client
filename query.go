@@ -253,7 +253,17 @@ func query(v interface{}) (string, error) {
 // writeQuery writes a minified query for t to w.
 // If inline is true, the struct fields of t are inlined into parent struct.
 func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error {
+
 	switch t.Kind() {
+	case reflect.Interface:
+		val := reflect.ValueOf(v.Interface())
+		if !val.IsValid() {
+			return nil
+		}
+		err := writeQuery(w, val.Type(), val, inline)
+		if err != nil {
+			return fmt.Errorf("failed to write query for interface `%v`: %w", t, err)
+		}
 	case reflect.Ptr:
 		err := writeQuery(w, t.Elem(), ElemSafe(v), false)
 		if err != nil {

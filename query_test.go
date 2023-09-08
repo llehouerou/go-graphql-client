@@ -887,3 +887,105 @@ type AddReactionInput struct {
 	// A unique identifier for the client performing the mutation. (Optional.)
 	ClientMutationID *string `json:"clientMutationId,omitempty"`
 }
+
+type ActualNodes[T any, U ~[]T] struct {
+	gqlType string `graphql:"-"`
+	Nodes   U
+}
+
+func (an *ActualNodes[T, U]) GetInnerLayer() ContainerLayer {
+	return nil
+}
+
+func (an *ActualNodes[T, U]) GetNodes() interface{} {
+	return an.Nodes
+}
+
+func (an *ActualNodes[T, U]) GetGraphQLType() string {
+	return an.gqlType
+}
+
+type ContainerLayer interface {
+	GetInnerLayer() ContainerLayer
+	GetNodes() interface{}
+	GetGraphQLType() string
+}
+
+type NestedLayer struct {
+	gqlType    string `graphql:"-"`
+	InnerLayer ContainerLayer
+}
+
+func (nl *NestedLayer) GetInnerLayer() ContainerLayer {
+	return nl.InnerLayer
+}
+
+func (nl *NestedLayer) GetNodes() interface{} {
+	return nil
+}
+
+func (nl *NestedLayer) GetGraphQLType() string {
+	return nl.gqlType
+}
+
+type NestedQuery[T any, U ~[]T] struct {
+	OutermostLayer ContainerLayer
+}
+
+func (q *NestedQuery[T, U]) GetNodes() U {
+	if q.OutermostLayer == nil {
+		return nil
+	}
+	layer := q.OutermostLayer
+	for layer.GetInnerLayer() != nil {
+		layer = layer.GetInnerLayer()
+	}
+	return layer.GetNodes().(U)
+}
+
+func NewNestedQuery[T any, U ~[]T](containerLayers ...string) *NestedQuery[T, U] {
+	if len(containerLayers) == 0 {
+		return &NestedQuery[T, U]{
+			OutermostLayer: &ActualNodes[T, U]{},
+		}
+	}
+
+	var buildLayer func(index int) ContainerLayer
+	buildLayer = func(index int) ContainerLayer {
+		if index == len(containerLayers)-1 {
+			return &ActualNodes[T, U]{
+				gqlType: containerLayers[index],
+			}
+		}
+		return &NestedLayer{
+			gqlType:    containerLayers[index],
+			InnerLayer: buildLayer(index + 1),
+		}
+	}
+
+	return &NestedQuery[T, U]{OutermostLayer: buildLayer(0)}
+}
+
+type Test struct {
+	Value string `graphql:"value"`
+}
+
+func (t Test) GetGraphQLType() string {
+	return "test"
+}
+
+type Tests []Test
+
+func (t Tests) GetGraphQLType() string {
+	return "tests"
+}
+func TestInterface(t *testing.T) {
+	q := NewNestedQuery[Test, Tests]("testcontainer")
+	want := `{testcontainer{tests{value}}}`
+	got, err := ConstructQuery(q, make(map[string]interface{}))
+	if err != nil {
+		t.Error(err)
+	} else if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
