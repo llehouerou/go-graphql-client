@@ -118,7 +118,6 @@ func (d *decoder) decode() error {
 				case reflect.Struct:
 					f, isScalar = fieldByGraphQLName(v, key)
 					if f.IsValid() {
-						fmt.Println("field", f.IsValid(), f.Type().Name(), f.Type().Kind(), f.CanAddr())
 						fwrapper := f
 						for fwrapper.Kind() == reflect.Ptr || fwrapper.Kind() == reflect.Interface {
 							fwrapper = fwrapper.Elem()
@@ -127,8 +126,6 @@ func (d *decoder) decode() error {
 						if method.IsValid() {
 							wrapped := fwrapper.FieldByName("Value")
 							if wrapped.IsValid() {
-								wrappedName := wrapped.Type().Name()
-								fmt.Println("wrappedField", wrapped.IsValid(), wrappedName, wrapped.Type().Kind(), f.CanAddr())
 								f = wrapped
 							}
 						}
@@ -490,7 +487,6 @@ func unmarshalValue(value interface{}, v reflect.Value) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(v.Type().Name(), newVal.Elem().Type().Name())
 	v.Set(newVal.Elem())
 	return nil
 }
