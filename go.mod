@@ -10,6 +10,6 @@ require (
 )
 
 require (
-	github.com/gorilla/websocket v1.4.1 // indirect
-	github.com/klauspost/compress v1.10.3 // indirect
+	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/klauspost/compress v1.16.7 // indirect
 )

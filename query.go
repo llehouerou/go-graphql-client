@@ -270,6 +270,19 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			return fmt.Errorf("failed to write query for ptr `%v`: %w", t, err)
 		}
 	case reflect.Struct:
+
+		if v.IsValid() {
+			method := v.MethodByName("GetGraphQLWrapped")
+			if method.IsValid() {
+				wrapped := method.Call(nil)[0]
+				err := writeQuery(w, reflect.TypeOf(wrapped.Interface()), reflect.ValueOf(wrapped.Interface()), inline)
+				if err != nil {
+					return fmt.Errorf("failed to write query for wrapped struct `%v`: %w", t, err)
+				}
+				return nil
+			}
+		}
+
 		// If the type implements json.Unmarshaler, it's a scalar. Don't expand it.
 		if reflect.PtrTo(t).Implements(jsonUnmarshaler) {
 			return nil
@@ -316,18 +329,6 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			// Skip writeQuery if the GraphQL type associated with the filed is scalar
 			if isTrue(f.Tag.Get("scalar")) {
 				continue
-			}
-
-			if v.IsValid() {
-				method := v.Field(i).MethodByName("GetGraphQLWrapped")
-				if method.IsValid() {
-					wrapped := method.Call(nil)[0]
-					err := writeQuery(w, reflect.TypeOf(wrapped.Interface()), reflect.ValueOf(wrapped.Interface()), inlineField)
-					if err != nil {
-						return fmt.Errorf("failed to write query for struct field `%v`: %w", f.Name, err)
-					}
-					continue
-				}
 			}
 
 			err := writeQuery(w, f.Type, FieldSafe(v, i), inlineField)

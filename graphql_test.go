@@ -440,3 +440,138 @@ func mustWrite(w io.Writer, s string) {
 		panic(err)
 	}
 }
+
+type Id struct {
+	Type string
+	ID   string
+}
+
+type Wrapped struct {
+	Value1 string `graphql:"value1"`
+	Value2 Id     `graphql:"value2"`
+}
+
+type Wrapper[T any] struct {
+	Value T
+}
+
+func (w Wrapper[T]) GetGraphQLType() string {
+	return "wrapper"
+}
+
+func (w Wrapper[T]) GetGraphQLWrapped() T {
+	return w.Value
+}
+
+func (w Wrapper[T]) GetInnerLayer() ContainerLayer[T] {
+	return nil
+}
+
+type ActualNodes[T any] struct {
+	gqlType string `graphql:"-"`
+	Nodes   T
+}
+
+func (an *ActualNodes[T]) GetInnerLayer() ContainerLayer[T] {
+	return nil
+}
+
+func (an *ActualNodes[T]) GetNodes() T {
+	return an.Nodes
+}
+
+func (an *ActualNodes[T]) GetGraphQLType() string {
+	return an.gqlType
+}
+
+type ContainerLayer[T any] interface {
+	GetInnerLayer() ContainerLayer[T]
+	GetNodes() T
+	GetGraphQLType() string
+}
+
+type NestedLayer[T any] struct {
+	gqlType    string `graphql:"-"`
+	InnerLayer ContainerLayer[T]
+}
+
+func (nl *NestedLayer[T]) GetInnerLayer() ContainerLayer[T] {
+	return nl.InnerLayer
+}
+
+func (nl *NestedLayer[T]) GetNodes() T {
+	var res T
+	return res
+}
+
+func (nl *NestedLayer[T]) GetGraphQLType() string {
+	return nl.gqlType
+}
+
+type NestedQuery[T any] struct {
+	OutermostLayer ContainerLayer[T]
+}
+
+func (q *NestedQuery[T]) GetNodes() T {
+	if q.OutermostLayer == nil {
+		var res T
+		return res
+	}
+	layer := q.OutermostLayer
+	for layer.GetInnerLayer() != nil {
+		layer = layer.GetInnerLayer()
+	}
+	return layer.GetNodes()
+}
+
+func NewNestedQuery[T any](containerLayers ...string) *NestedQuery[T] {
+	if len(containerLayers) == 0 {
+		return &NestedQuery[T]{
+			OutermostLayer: &ActualNodes[T]{},
+		}
+	}
+
+	var buildLayer func(index int) ContainerLayer[T]
+	buildLayer = func(index int) ContainerLayer[T] {
+		if index == len(containerLayers)-1 {
+			return &ActualNodes[T]{
+				gqlType: containerLayers[index],
+			}
+		}
+		return &NestedLayer[T]{
+			gqlType:    containerLayers[index],
+			InnerLayer: buildLayer(index + 1),
+		}
+	}
+
+	return &NestedQuery[T]{OutermostLayer: buildLayer(0)}
+}
+
+func TestClient_Query_withWrapper(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+		body := mustRead(req.Body)
+		if got, want := body, `{"query":"{testcontainer{wrapper{value1,value2{type,id}}}}"}`+"\n"; got != want {
+			t.Errorf("got body: %v, want %v", got, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		mustWrite(w, `{"data": {"testcontainer": { "wrapper": {"value1": "Gopher", "value2": {"type": "test", "id": "123"}}}}}}`)
+	})
+	client := graphql.NewClient("/graphql", &http.Client{Transport: localRoundTripper{handler: mux}})
+
+	q := NewNestedQuery[Wrapper[Wrapped]]("testcontainer")
+	err := client.Query(context.Background(), &q, map[string]interface{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := q.GetNodes().Value.Value1, "Gopher"; got != want {
+		t.Errorf("got q.User.Name: %q, want: %q", got, want)
+	}
+	if got, want := q.GetNodes().Value.Value2.Type, "test"; got != want {
+		t.Errorf("got q.User.Name: %q, want: %q", got, want)
+	}
+	if got, want := q.GetNodes().Value.Value2.ID, "123"; got != want {
+		t.Errorf("got q.User.Name: %q, want: %q", got, want)
+	}
+
+}
