@@ -122,11 +122,13 @@ func (d *decoder) decode() error {
 						for fwrapper.Kind() == reflect.Ptr || fwrapper.Kind() == reflect.Interface {
 							fwrapper = fwrapper.Elem()
 						}
-						method := fwrapper.MethodByName("GetGraphQLWrapped")
-						if method.IsValid() {
-							wrapped := fwrapper.FieldByName("Value")
-							if wrapped.IsValid() {
-								f = wrapped
+						if fwrapper.IsValid() {
+							method := fwrapper.MethodByName("GetGraphQLWrapped")
+							if method.IsValid() {
+								wrapped := fwrapper.FieldByName("Value")
+								if wrapped.IsValid() {
+									f = wrapped
+								}
 							}
 						}
 						someFieldExist = true
