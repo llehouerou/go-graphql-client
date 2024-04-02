@@ -140,10 +140,14 @@ func (d *decoder) decode() error {
 					}
 				case reflect.Slice:
 					f = orderedMapValueByGraphQLName(v, key)
+					for f.Kind() == reflect.Ptr || f.Kind() == reflect.Interface {
+						f = f.Elem()
+					}
 					if f.IsValid() {
 						someFieldExist = true
 					}
 				}
+
 				d.vs[i] = append(d.vs[i], f)
 			}
 			if !someFieldExist {
@@ -177,6 +181,17 @@ func (d *decoder) decode() error {
 				for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 					v = v.Elem()
 				}
+				fwrapper := v
+				if fwrapper.IsValid() {
+					method := fwrapper.MethodByName("GetGraphQLWrapped")
+					if method.IsValid() {
+						wrapped := fwrapper.FieldByName("Value")
+						if wrapped.IsValid() {
+							v = wrapped
+						}
+					}
+				}
+
 				var f reflect.Value
 				if v.Kind() == reflect.Slice {
 					// we want to append the template item copy
@@ -314,7 +329,10 @@ func copyTemplate(template reflect.Value) (reflect.Value, error) {
 		return copyOrderedMap(template), nil
 	}
 	if template.Kind() == reflect.Map {
-		return reflect.Value{}, fmt.Errorf("unsupported template type `%v`, use [][2]interface{} for ordered map instead", template.Type())
+		return reflect.Value{}, fmt.Errorf(
+			"unsupported template type `%v`, use [][2]interface{} for ordered map instead",
+			template.Type(),
+		)
 	}
 	// don't need to copy regular slice
 	return template, nil
