@@ -58,6 +58,17 @@ type decoder struct {
 	// a single JSON value into multiple GraphQL fragments or embedded structs, so
 	// we keep track of them all.
 	vs []stack
+
+	// fragmentTypes tracks the typename for each stack in vs. Empty string means not a fragment
+	// or typename not applicable. This is used to filter inline fragments.
+	fragmentTypes []string
+
+	// currentTypename holds the __typename value for the current object being unmarshaled.
+	// This is used to filter inline fragments so only the matching fragment is populated.
+	currentTypename string
+
+	// currentKey holds the current JSON key being processed, used to capture __typename.
+	currentKey string
 }
 
 type stack []reflect.Value
@@ -70,6 +81,33 @@ func (s stack) Pop() stack {
 	return s[:len(s)-1]
 }
 
+// shouldIncludeFragment determines if a GraphQL fragment field should be included
+// based on the current typename. Returns true if:
+// - No typename is set (backward compatibility: include all fragments)
+// - The fragment's typename matches the current typename
+func (d *decoder) shouldIncludeFragment(field reflect.StructField) bool {
+	tag, ok := field.Tag.Lookup("graphql")
+	if !ok {
+		return true
+	}
+	return d.shouldIncludeFragmentByTag(tag)
+}
+
+// shouldIncludeFragmentByTag determines if a fragment with the given tag should be included.
+func (d *decoder) shouldIncludeFragmentByTag(tag string) bool {
+	// If no typename is set, include all fragments (backward compatibility)
+	if d.currentTypename == "" {
+		return true
+	}
+	// Extract the typename from the fragment tag
+	fragmentTypename := extractFragmentTypename(tag)
+	if fragmentTypename == "" {
+		return true // Not a fragment or malformed tag, include it
+	}
+	// Only include if the fragment typename matches the current typename
+	return fragmentTypename == d.currentTypename
+}
+
 // Decode decodes a single JSON value from d.tokenizer into v.
 func (d *decoder) Decode(v interface{}) error {
 	rv := reflect.ValueOf(v)
@@ -77,6 +115,7 @@ func (d *decoder) Decode(v interface{}) error {
 		return fmt.Errorf("cannot decode into non-pointer %T", v)
 	}
 	d.vs = []stack{{rv.Elem()}}
+	d.fragmentTypes = []string{""} // Root is not a fragment
 	return d.decode()
 }
 
@@ -104,11 +143,22 @@ func (d *decoder) decode() error {
 			if !ok {
 				return errors.New("unexpected non-key in JSON input")
 			}
+
+			// Track current key for typename capture
+			d.currentKey = key
+
 			someFieldExist := false
 			// If one field is raw all must be treated as raw
 			rawMessage := false
 			isScalar := false
 			for i := range d.vs {
+				// Skip this stack if it's a fragment that doesn't match the current typename
+				if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" && d.currentTypename != "" && d.fragmentTypes[i] != d.currentTypename {
+					// Add invalid field to maintain stack alignment
+					d.vs[i] = append(d.vs[i], reflect.Value{})
+					continue
+				}
+
 				v := d.vs[i].Top()
 				for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 					v = v.Elem()
@@ -215,6 +265,13 @@ func (d *decoder) decode() error {
 		case string, json.Number, bool, nil, json.RawMessage:
 			// Value.
 
+			// Capture __typename value to filter inline fragments
+			if d.currentKey == "__typename" {
+				if typename, ok := tok.(string); ok {
+					d.currentTypename = typename
+				}
+			}
+
 			for i := range d.vs {
 				v := d.vs[i].Top()
 				if !v.IsValid() {
@@ -253,9 +310,17 @@ func (d *decoder) decode() error {
 					}
 					if v.Kind() == reflect.Struct {
 						for i := 0; i < v.NumField(); i++ {
-							if isGraphQLFragment(v.Type().Field(i)) || v.Type().Field(i).Anonymous {
-								// Add GraphQL fragment or embedded struct.
+							field := v.Type().Field(i)
+							if isGraphQLFragment(field) {
+								// Add GraphQL fragment and track its typename
 								d.vs = append(d.vs, []reflect.Value{v.Field(i)})
+								tag, _ := field.Tag.Lookup("graphql")
+								d.fragmentTypes = append(d.fragmentTypes, extractFragmentTypename(tag))
+								frontier = append(frontier, v.Field(i))
+							} else if field.Anonymous {
+								// Add embedded struct (not a fragment)
+								d.vs = append(d.vs, []reflect.Value{v.Field(i)})
+								d.fragmentTypes = append(d.fragmentTypes, "")
 								frontier = append(frontier, v.Field(i))
 							}
 						}
@@ -263,9 +328,11 @@ func (d *decoder) decode() error {
 						for i := 0; i < v.Len(); i++ {
 							pair := v.Index(i)
 							key, val := pair.Index(0), pair.Index(1)
-							if keyForGraphQLFragment(key.Interface().(string)) {
-								// Add GraphQL fragment or embedded struct.
+							keyStr := key.Interface().(string)
+							if keyForGraphQLFragment(keyStr) {
+								// Add GraphQL fragment and track its typename
 								d.vs = append(d.vs, []reflect.Value{val})
+								d.fragmentTypes = append(d.fragmentTypes, extractFragmentTypename(keyStr))
 								frontier = append(frontier, val)
 							}
 						}
@@ -379,13 +446,21 @@ func (d *decoder) state() json.Delim {
 // popAllVs pops from all d.vs stacks, keeping only non-empty ones.
 func (d *decoder) popAllVs() {
 	var nonEmpty []stack
+	var nonEmptyTypes []string
 	for i := range d.vs {
 		d.vs[i] = d.vs[i].Pop()
 		if len(d.vs[i]) > 0 {
 			nonEmpty = append(nonEmpty, d.vs[i])
+			// Keep fragment type in sync, using empty string if index out of bounds
+			if i < len(d.fragmentTypes) {
+				nonEmptyTypes = append(nonEmptyTypes, d.fragmentTypes[i])
+			} else {
+				nonEmptyTypes = append(nonEmptyTypes, "")
+			}
 		}
 	}
 	d.vs = nonEmpty
+	d.fragmentTypes = nonEmptyTypes
 }
 
 // popLeftArrayTemplates pops left from last array items of all d.vs stacks.
@@ -485,6 +560,25 @@ func isGraphQLFragment(f reflect.StructField) bool {
 func keyForGraphQLFragment(value string) bool {
 	value = strings.TrimSpace(value) // TODO: Parse better.
 	return strings.HasPrefix(value, "...")
+}
+
+// extractFragmentTypename extracts the typename from a GraphQL fragment tag.
+// For example, "... on SolanaTokenTransferAuthorizationRequest" returns "SolanaTokenTransferAuthorizationRequest".
+// Returns empty string if not a valid fragment tag.
+func extractFragmentTypename(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if !strings.HasPrefix(tag, "...") {
+		return ""
+	}
+	// Remove "..." prefix
+	tag = strings.TrimSpace(tag[3:])
+	// Check for "on " prefix
+	if !strings.HasPrefix(tag, "on ") {
+		return ""
+	}
+	// Extract typename after "on "
+	typename := strings.TrimSpace(tag[3:])
+	return typename
 }
 
 // unmarshalValue unmarshals JSON value into v.

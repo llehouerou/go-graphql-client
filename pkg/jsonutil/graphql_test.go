@@ -496,12 +496,8 @@ func TestUnmarshalGraphQL_union(t *testing.T) {
 			},
 			CreatedAt: time.Unix(1498709521, 0).UTC(),
 		},
-		ReopenedEvent: reopenedEvent{
-			Actor: actor{
-				Login: "shurcooL-test",
-			},
-			CreatedAt: time.Unix(1498709521, 0).UTC(),
-		},
+		// ReopenedEvent should NOT be populated since __typename is "ClosedEvent"
+		ReopenedEvent: reopenedEvent{},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Error("not equal")
@@ -623,5 +619,125 @@ func TestUnmarshalGraphQL_arrayInsideInlineFragment(t *testing.T) {
 	want.Search.Nodes[0].PullRequest.Commits.Nodes[0].URL = "https://example.org/commit/49e1"
 	if !reflect.DeepEqual(got, want) {
 		t.Error("not equal")
+	}
+}
+
+func TestUnmarshalGraphQL_unionWithConflictingFieldTypes(t *testing.T) {
+	/*
+		Issue: When a union type has inline fragments with fields of the same name
+		but different types, unmarshaling fails with "cannot unmarshal string into
+		Go value of type int" because the library tries to unmarshal all fields into
+		ALL fragments instead of only the fragment matching __typename.
+
+		GraphQL Query:
+		{
+			authorizations {
+				__typename
+				... on StarkexTransferAuthorizationRequest {
+					nonce
+					amount
+				}
+				... on SolanaTokenTransferAuthorizationRequest {
+					nonce
+					assetId
+				}
+				... on MangopayWalletTransferAuthorizationRequest {
+					nonce
+					amount
+				}
+			}
+		}
+	*/
+
+	type starkexTransfer struct {
+		Nonce  int    `graphql:"nonce"`  // int type
+		Amount string `graphql:"amount"`
+	}
+
+	type solanaTokenTransfer struct {
+		Nonce   string `graphql:"nonce"` // string type - CONFLICT!
+		AssetId string `graphql:"assetId"`
+	}
+
+	type mangopayWalletTransfer struct {
+		Nonce  int `graphql:"nonce"` // int type
+		Amount int `graphql:"amount"`
+	}
+
+	type authorizationRequest struct {
+		Typename               string                 `graphql:"__typename"`
+		StarkexTransfer        starkexTransfer        `graphql:"... on StarkexTransferAuthorizationRequest"`
+		SolanaTokenTransfer    solanaTokenTransfer    `graphql:"... on SolanaTokenTransferAuthorizationRequest"`
+		MangopayWalletTransfer mangopayWalletTransfer `graphql:"... on MangopayWalletTransferAuthorizationRequest"`
+	}
+
+	var got authorizationRequest
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"__typename": "SolanaTokenTransferAuthorizationRequest",
+		"nonce": "1234567890",
+		"assetId": "0x123abc"
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Expected: Only the SolanaTokenTransfer fragment should be populated
+	// since __typename matches "SolanaTokenTransferAuthorizationRequest"
+	want := authorizationRequest{
+		Typename: "SolanaTokenTransferAuthorizationRequest",
+		SolanaTokenTransfer: solanaTokenTransfer{
+			Nonce:   "1234567890",
+			AssetId: "0x123abc",
+		},
+		// Other fragments should remain zero-valued
+		StarkexTransfer:        starkexTransfer{},
+		MangopayWalletTransfer: mangopayWalletTransfer{},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+func TestUnmarshalGraphQL_unionWithoutTypename(t *testing.T) {
+	/*
+		Test backward compatibility: when there's no __typename field,
+		all fragments should be populated (old behavior).
+	*/
+
+	type typeA struct {
+		FieldA string `graphql:"fieldA"`
+	}
+
+	type typeB struct {
+		FieldB int `graphql:"fieldB"`
+	}
+
+	type unionType struct {
+		FragmentA typeA `graphql:"... on TypeA"`
+		FragmentB typeB `graphql:"... on TypeB"`
+	}
+
+	var got unionType
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"fieldA": "value_a",
+		"fieldB": 42
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without __typename, BOTH fragments should be populated (backward compatibility)
+	want := unionType{
+		FragmentA: typeA{
+			FieldA: "value_a",
+		},
+		FragmentB: typeB{
+			FieldB: 42,
+		},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
 	}
 }
