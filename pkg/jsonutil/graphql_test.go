@@ -786,3 +786,77 @@ func TestUnmarshalGraphQL_unionWithoutTypename(t *testing.T) {
 		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
 	}
 }
+
+func TestUnmarshalGraphQL_interfaceFragment(t *testing.T) {
+	/*
+		Tests that interface fragments work correctly when __typename is a concrete
+		type that implements the interface.
+
+		GraphQL Query:
+		{
+			team {
+				__typename
+				... on TeamInterface {
+					slug
+				}
+			}
+		}
+
+		When __typename is "Club" or "NationalTeam" (concrete types implementing
+		TeamInterface), the slug field from the interface fragment should still
+		be populated.
+	*/
+
+	type team struct {
+		Typename string `graphql:"__typename"`
+		Team     struct {
+			Slug string `graphql:"slug"`
+		} `graphql:"... on TeamInterface"`
+	}
+
+	// Test with Club type
+	var gotClub team
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"__typename": "Club",
+		"slug": "barcelona"
+	}`), &gotClub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantClub := team{
+		Typename: "Club",
+		Team: struct {
+			Slug string `graphql:"slug"`
+		}{
+			Slug: "barcelona",
+		},
+	}
+
+	if !reflect.DeepEqual(gotClub, wantClub) {
+		t.Errorf("Club: not equal\ngot:  %+v\nwant: %+v", gotClub, wantClub)
+	}
+
+	// Test with NationalTeam type
+	var gotNationalTeam team
+	err = jsonutil.UnmarshalGraphQL([]byte(`{
+		"__typename": "NationalTeam",
+		"slug": "france"
+	}`), &gotNationalTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantNationalTeam := team{
+		Typename: "NationalTeam",
+		Team: struct {
+			Slug string `graphql:"slug"`
+		}{
+			Slug: "france",
+		},
+	}
+
+	if !reflect.DeepEqual(gotNationalTeam, wantNationalTeam) {
+		t.Errorf("NationalTeam: not equal\ngot:  %+v\nwant: %+v", gotNationalTeam, wantNationalTeam)
+	}
+}

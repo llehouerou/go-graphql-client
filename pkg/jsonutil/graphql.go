@@ -151,22 +151,26 @@ func (d *decoder) decode() error {
 			// If one field is raw all must be treated as raw
 			rawMessage := false
 			isScalar := false
-			for i := range d.vs {
-				// Skip this stack if it's a fragment that doesn't match the current typename
-				if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" && d.currentTypename != "" && d.fragmentTypes[i] != d.currentTypename {
-					// Add invalid field to maintain stack alignment
-					d.vs[i] = append(d.vs[i], reflect.Value{})
-					continue
-				}
 
+			// First pass: find all fields and check if any matching fragment has it
+			type fieldInfo struct {
+				field         reflect.Value
+				isScalar      bool
+				fragmentMatch bool
+			}
+			fields := make([]fieldInfo, len(d.vs))
+			hasMatchingFragmentWithField := false
+
+			for i := range d.vs {
 				v := d.vs[i].Top()
 				for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 					v = v.Elem()
 				}
 				var f reflect.Value
+				var scalar bool
 				switch v.Kind() {
 				case reflect.Struct:
-					f, isScalar = fieldByGraphQLName(v, key)
+					f, scalar = fieldByGraphQLName(v, key)
 					if f.IsValid() {
 						fwrapper := f
 						for fwrapper.Kind() == reflect.Ptr || fwrapper.Kind() == reflect.Interface {
@@ -181,12 +185,10 @@ func (d *decoder) decode() error {
 								}
 							}
 						}
-						someFieldExist = true
 						// Check for special embedded json
 						if f.Type() == rawMessageValue.Type() {
 							rawMessage = true
 						}
-
 					}
 				case reflect.Slice:
 					f = orderedMapValueByGraphQLName(v, key)
@@ -196,9 +198,36 @@ func (d *decoder) decode() error {
 					for f.Kind() == reflect.Ptr {
 						f = f.Elem()
 					}
-					if f.IsValid() {
-						someFieldExist = true
+				}
+
+				fragmentMatch := true
+				if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" && d.currentTypename != "" {
+					fragmentMatch = d.fragmentTypes[i] == d.currentTypename
+				}
+
+				fields[i] = fieldInfo{field: f, isScalar: scalar, fragmentMatch: fragmentMatch}
+
+				if f.IsValid() && fragmentMatch {
+					hasMatchingFragmentWithField = true
+				}
+			}
+
+			// Second pass: decide which fields to use
+			for i := range d.vs {
+				f := fields[i].field
+
+				if f.IsValid() {
+					someFieldExist = true
+					if fields[i].isScalar {
+						isScalar = true
 					}
+				}
+
+				// Skip this field if:
+				// 1. It's from a non-matching fragment AND
+				// 2. A matching fragment also has this field
+				if f.IsValid() && !fields[i].fragmentMatch && hasMatchingFragmentWithField {
+					f = reflect.Value{}
 				}
 
 				d.vs[i] = append(d.vs[i], f)
