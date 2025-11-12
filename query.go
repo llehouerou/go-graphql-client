@@ -298,8 +298,25 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			f := t.Field(i)
 			value := ""
 			ok := false
+
+			// Check if the field type implements GraphQLType
 			if f.Type.Implements(types.GraphqlTypeInterface) {
 				graphqlType, typeok := v.Field(i).Interface().(types.GraphQLType)
+				if typeok {
+					value = graphqlType.GetGraphQLType()
+					ok = true
+				}
+			} else if f.Type.Kind() == reflect.Slice && f.Type.Elem().Implements(types.GraphqlTypeInterface) {
+				// For slices, check if the element type implements GraphQLType
+				elemType := f.Type.Elem()
+				// Create a zero value of the element type to call GetGraphQLType()
+				var graphqlType types.GraphQLType
+				var typeok bool
+				if elemType.Kind() == reflect.Ptr {
+					graphqlType, typeok = reflect.New(elemType.Elem()).Interface().(types.GraphQLType)
+				} else {
+					graphqlType, typeok = reflect.Zero(elemType).Interface().(types.GraphQLType)
+				}
 				if typeok {
 					value = graphqlType.GetGraphQLType()
 					ok = true

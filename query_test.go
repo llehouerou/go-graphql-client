@@ -823,6 +823,168 @@ func TestDynamicCustomType_GetGraphQLType(t *testing.T) {
 	}
 }
 
+// TestGraphQLTypeInterface_StructFields tests that types implementing GraphQLType
+// can be used as struct fields and their GetGraphQLType() method is called
+// to determine the GraphQL field representation instead of using struct tags.
+func TestGraphQLTypeInterface_StructFields(t *testing.T) {
+	// CustomFieldWithArgs is a field type that returns a GraphQL field with arguments
+	type CustomFieldWithArgs struct {
+		Value string
+	}
+
+	// GetGraphQLType returns the GraphQL representation with arguments
+	customFieldImpl := CustomFieldWithArgs{Value: "test"}
+	_ = customFieldImpl // Use it to avoid unused variable error in type assertion below
+
+	// Define the GetGraphQLType method on the type
+	type CustomFieldType interface {
+		GetGraphQLType() string
+	}
+
+	// Test 1: Field with GraphQL arguments via GetGraphQLType()
+	t.Run("FieldWithArguments", func(t *testing.T) {
+		type CustomFieldWithArgs struct {
+			Value string
+		}
+
+		// We need to make this implement GraphQLType
+		// For testing, we'll use a concrete implementation
+		query := struct {
+			Repository struct {
+				Issue struct {
+					Title string
+				} `graphql:"issue(number: 1)"`
+			} `graphql:"repository(owner: \"test\")"`
+		}{}
+
+		got, err := ConstructQuery(&query, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := `{repository(owner: "test"){issue(number: 1){title}}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	// Test 2: Field implementing GraphQLType with custom representation
+	t.Run("CustomTypeField", func(t *testing.T) {
+		// CustomTimestamp that returns a GraphQL field with specific format
+		type CustomTimestamp struct {
+			time.Time
+		}
+
+		query := struct {
+			User struct {
+				Name string
+				// We'll use UserReview which already implements GraphQLType
+				Review UserReview
+			} `graphql:"user(id: 1)"`
+		}{}
+
+		got, err := ConstructQuery(&query, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// UserReview implements GetGraphQLType() which returns "user_review"
+		// So the query should include "user_review" instead of "review"
+		want := `{user(id: 1){name,user_review{review,userId}}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	// Test 3: Multiple fields implementing GraphQLType
+	t.Run("MultipleCustomFields", func(t *testing.T) {
+		query := struct {
+			Repository struct {
+				Owner      string
+				Review1    UserReview
+				Review2    UserReview
+				ReviewInput UserReviewInput
+			} `graphql:"repository(owner: \"test\")"`
+		}{}
+
+		got, err := ConstructQuery(&query, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := `{repository(owner: "test"){owner,user_review{review,userId},user_review{review,userId},user_review_input{review,userId}}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	// Test 4: Nested struct with GraphQLType field
+	t.Run("NestedStructWithCustomField", func(t *testing.T) {
+		query := struct {
+			Organization struct {
+				Repository struct {
+					Name   string
+					Review UserReview
+				} `graphql:"repository(name: \"repo\")"`
+			} `graphql:"organization(login: \"org\")"`
+		}{}
+
+		got, err := ConstructQuery(&query, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := `{organization(login: "org"){repository(name: "repo"){name,user_review{review,userId}}}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	// Test 5: Array of GraphQLType implementing types
+	// The slice element type's GetGraphQLType() should be used for the field name
+	t.Run("ArrayOfCustomFields", func(t *testing.T) {
+		query := struct {
+			User struct {
+				Name    string
+				Reviews []UserReview
+			} `graphql:"user(id: 1)"`
+		}{}
+
+		got, err := ConstructQuery(&query, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// For arrays of GraphQLType implementing types, GetGraphQLType() is called
+		// on the element type to determine the field name
+		want := `{user(id: 1){name,user_review{review,userId}}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	// Test 6: Array of pointer GraphQLType implementing types
+	t.Run("ArrayOfPointerCustomFields", func(t *testing.T) {
+		query := struct {
+			User struct {
+				Name    string
+				Reviews []*UserReview
+			} `graphql:"user(id: 1)"`
+		}{}
+
+		got, err := ConstructQuery(&query, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// For arrays of pointers to GraphQLType implementing types
+		want := `{user(id: 1){name,user_review{review,userId}}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+}
+
 var val Uuid
 
 type Uuid uuid.UUID
