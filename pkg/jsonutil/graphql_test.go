@@ -158,6 +158,50 @@ func TestUnmarshalGraphQL_orderedMap(t *testing.T) {
 	}
 }
 
+func TestUnmarshalGraphQL_orderedMapWithPointers(t *testing.T) {
+	// Test case similar to sorarezone usage - pointers in ordered map
+	type GameFormation struct {
+		Name string `graphql:"name"`
+		ID   string `graphql:"id"`
+	}
+
+	game1 := &GameFormation{}
+	game2 := &GameFormation{}
+
+	got := [][2]interface{}{
+		{"game0:game(id:\"1\")", game1},
+		{"game1:game(id:\"2\")", game2},
+	}
+
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"game0": {
+			"name": "Game One",
+			"id": "1"
+		},
+		"game1": {
+			"name": "Game Two",
+			"id": "2"
+		}
+	}`), &got)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if game1.Name != "Game One" {
+		t.Errorf("game1.Name = %q, want %q", game1.Name, "Game One")
+	}
+	if game1.ID != "1" {
+		t.Errorf("game1.ID = %q, want %q", game1.ID, "1")
+	}
+	if game2.Name != "Game Two" {
+		t.Errorf("game2.Name = %q, want %q", game2.Name, "Game Two")
+	}
+	if game2.ID != "2" {
+		t.Errorf("game2.ID = %q, want %q", game2.ID, "2")
+	}
+}
+
 func TestUnmarshalGraphQL_orderedMapAlias(t *testing.T) {
 	type Update struct {
 		Name string `graphql:"name"`
