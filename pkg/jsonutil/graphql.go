@@ -190,7 +190,10 @@ func (d *decoder) decode() error {
 					}
 				case reflect.Slice:
 					f = orderedMapValueByGraphQLName(v, key)
-					for f.Kind() == reflect.Ptr || f.Kind() == reflect.Interface {
+					// For ordered maps, we need to be careful about unwrapping
+					// Unwrap pointers, but keep interfaces as they are
+					// (unmarshalValue can handle interface types)
+					for f.Kind() == reflect.Ptr {
 						f = f.Elem()
 					}
 					if f.IsValid() {

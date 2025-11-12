@@ -562,9 +562,10 @@ func TestUnmarshalGraphQL_orderedMapUnion(t *testing.T) {
 			}
 		}
 	*/
-	actor := [][2]interface{}{{"login", ""}}
-	closedEvent := [][2]interface{}{{"actor", actor}, {"createdAt", time.Time{}}}
-	reopenedEvent := [][2]interface{}{{"actor", actor}, {"createdAt", time.Time{}}}
+	closedEventActor := [][2]interface{}{{"login", ""}}
+	reopenedEventActor := [][2]interface{}{{"login", ""}}
+	closedEvent := [][2]interface{}{{"actor", closedEventActor}, {"createdAt", time.Time{}}}
+	reopenedEvent := [][2]interface{}{{"actor", reopenedEventActor}, {"createdAt", time.Time{}}}
 	got := [][2]interface{}{
 		{"__typename", ""},
 		{"... on ClosedEvent", closedEvent},
@@ -587,8 +588,8 @@ func TestUnmarshalGraphQL_orderedMapUnion(t *testing.T) {
 			{"createdAt", time.Unix(1498709521, 0).UTC()},
 		}},
 		{"... on ReopenedEvent", [][2]interface{}{
-			{"actor", [][2]interface{}{{"login", "shurcooL-test"}}},
-			{"createdAt", time.Unix(1498709521, 0).UTC()},
+			{"actor", [][2]interface{}{{"login", ""}}},
+			{"createdAt", time.Time{}},
 		}},
 	}
 	if !reflect.DeepEqual(got, want) {
