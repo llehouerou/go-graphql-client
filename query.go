@@ -341,6 +341,13 @@ func writeQuery(
 		if !val.IsValid() {
 			return nil
 		}
+		// Check if the interface contains a nil pointer
+		kind := val.Kind()
+		if (kind == reflect.Ptr || kind == reflect.Interface || kind == reflect.Slice ||
+			kind == reflect.Map || kind == reflect.Chan || kind == reflect.Func) &&
+			val.IsNil() {
+			return nil
+		}
 		err := writeQuery(w, val.Type(), val, inline)
 		if err != nil {
 			return fmt.Errorf("failed to write query for interface `%v`: %w", t, err)
@@ -391,10 +398,24 @@ func writeQuery(
 
 			// Check if the field type implements GraphQLType
 			if f.Type.Implements(types.GraphqlTypeInterface) {
-				graphqlType, typeok := v.Field(i).Interface().(types.GraphQLType)
+				fieldVal := v.Field(i)
+				// Only skip nil pointers and nil interfaces (not nil slices/maps)
+				kind := fieldVal.Kind()
+				if !fieldVal.IsValid() || ((kind == reflect.Ptr || kind == reflect.Interface) && fieldVal.IsNil()) {
+					// Skip this field if it's a nil pointer or nil interface
+					continue
+				}
+				graphqlType, typeok := fieldVal.Interface().(types.GraphQLType)
 				if typeok {
-					value = graphqlType.GetGraphQLType()
-					ok = true
+					// Use reflection to check if the value inside the interface is nil pointer
+					graphqlTypeVal := reflect.ValueOf(graphqlType)
+					if graphqlTypeVal.IsValid() && (graphqlTypeVal.Kind() != reflect.Ptr || !graphqlTypeVal.IsNil()) {
+						value = graphqlType.GetGraphQLType()
+						ok = true
+					} else {
+						// Skip this field if the concrete value is a nil pointer
+						continue
+					}
 				}
 			} else if f.Type.Kind() == reflect.Slice && f.Type.Elem().Implements(types.GraphqlTypeInterface) {
 				// For slices, check if the element type implements GraphQLType
@@ -522,4 +543,14 @@ var idType = reflect.TypeOf(ID(""))
 func isTrue(s string) bool {
 	b, _ := strconv.ParseBool(s)
 	return b
+}
+
+// isNillable returns true if the given kind can be nil
+func isNillable(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func:
+		return true
+	default:
+		return false
+	}
 }
