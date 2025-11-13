@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1468,6 +1469,367 @@ func TestClient_decodeResponse(t *testing.T) {
 
 		if code, ok := errs[0].Extensions["code"].(string); !ok || code != graphql.ErrJsonDecode {
 			t.Errorf("expected error code %q, got %v", graphql.ErrJsonDecode, code)
+		}
+	})
+}
+
+// TestError_GetCode tests the GetCode helper method.
+func TestError_GetCode(t *testing.T) {
+	t.Run("returns code when present", func(t *testing.T) {
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"code": graphql.ErrRequestError,
+			},
+		}
+
+		got := err.GetCode()
+		if got != graphql.ErrRequestError {
+			t.Errorf("expected code %q, got %q", graphql.ErrRequestError, got)
+		}
+	})
+
+	t.Run("returns empty string when extensions is nil", func(t *testing.T) {
+		err := graphql.Error{
+			Message: "test error",
+		}
+
+		got := err.GetCode()
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("returns empty string when code not present", func(t *testing.T) {
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"other": "value",
+			},
+		}
+
+		got := err.GetCode()
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("returns empty string when code is wrong type", func(t *testing.T) {
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"code": 123,
+			},
+		}
+
+		got := err.GetCode()
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+}
+
+// TestError_GetInternalExtensions tests the GetInternalExtensions
+// helper method.
+func TestError_GetInternalExtensions(t *testing.T) {
+	t.Run("returns nil when extensions is nil", func(t *testing.T) {
+		err := graphql.Error{
+			Message: "test error",
+		}
+
+		got := err.GetInternalExtensions()
+		if got != nil {
+			t.Errorf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("returns nil when internal not present", func(t *testing.T) {
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"code": graphql.ErrRequestError,
+			},
+		}
+
+		got := err.GetInternalExtensions()
+		if got != nil {
+			t.Errorf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("returns typed request info", func(t *testing.T) {
+		headers := http.Header{
+			"Content-Type": []string{"application/json"},
+		}
+		body := `{"query":"test"}`
+
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"internal": map[string]any{
+					"request": map[string]any{
+						"headers": headers,
+						"body":    body,
+					},
+				},
+			},
+		}
+
+		got := err.GetInternalExtensions()
+		if got == nil {
+			t.Fatal("expected non-nil internal extensions")
+		}
+
+		if got.Request == nil {
+			t.Fatal("expected non-nil request info")
+		}
+
+		if got.Request.Body != body {
+			t.Errorf("expected body %q, got %q", body, got.Request.Body)
+		}
+
+		if len(got.Request.Headers) != len(headers) {
+			t.Errorf(
+				"expected %d headers, got %d",
+				len(headers),
+				len(got.Request.Headers),
+			)
+		}
+	})
+
+	t.Run("returns typed response info", func(t *testing.T) {
+		headers := http.Header{
+			"Content-Type": []string{"application/json"},
+		}
+		body := `{"data":null}`
+
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"internal": map[string]any{
+					"response": map[string]any{
+						"headers": headers,
+						"body":    body,
+					},
+				},
+			},
+		}
+
+		got := err.GetInternalExtensions()
+		if got == nil {
+			t.Fatal("expected non-nil internal extensions")
+		}
+
+		if got.Response == nil {
+			t.Fatal("expected non-nil response info")
+		}
+
+		if got.Response.Body != body {
+			t.Errorf("expected body %q, got %q", body, got.Response.Body)
+		}
+
+		if len(got.Response.Headers) != len(headers) {
+			t.Errorf(
+				"expected %d headers, got %d",
+				len(headers),
+				len(got.Response.Headers),
+			)
+		}
+	})
+
+	t.Run("returns typed error info", func(t *testing.T) {
+		testErr := fmt.Errorf("test error detail")
+
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"internal": map[string]any{
+					"error": testErr,
+				},
+			},
+		}
+
+		got := err.GetInternalExtensions()
+		if got == nil {
+			t.Fatal("expected non-nil internal extensions")
+		}
+
+		if got.Error == nil {
+			t.Fatal("expected non-nil error")
+		}
+
+		if got.Error.Error() != testErr.Error() {
+			t.Errorf(
+				"expected error %q, got %q",
+				testErr.Error(),
+				got.Error.Error(),
+			)
+		}
+	})
+
+	t.Run("returns all info when present", func(t *testing.T) {
+		reqHeaders := http.Header{
+			"Content-Type": []string{"application/json"},
+		}
+		reqBody := `{"query":"test"}`
+		respHeaders := http.Header{
+			"Content-Type": []string{"application/json"},
+		}
+		respBody := `{"data":null}`
+		testErr := fmt.Errorf("io error")
+
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"code": graphql.ErrRequestError,
+				"internal": map[string]any{
+					"request": map[string]any{
+						"headers": reqHeaders,
+						"body":    reqBody,
+					},
+					"response": map[string]any{
+						"headers": respHeaders,
+						"body":    respBody,
+					},
+					"error": testErr,
+				},
+			},
+		}
+
+		got := err.GetInternalExtensions()
+		if got == nil {
+			t.Fatal("expected non-nil internal extensions")
+		}
+
+		if got.Request == nil {
+			t.Fatal("expected non-nil request info")
+		}
+		if got.Request.Body != reqBody {
+			t.Errorf("expected request body %q, got %q", reqBody, got.Request.Body)
+		}
+
+		if got.Response == nil {
+			t.Fatal("expected non-nil response info")
+		}
+		if got.Response.Body != respBody {
+			t.Errorf(
+				"expected response body %q, got %q",
+				respBody,
+				got.Response.Body,
+			)
+		}
+
+		if got.Error == nil {
+			t.Fatal("expected non-nil error")
+		}
+		if got.Error.Error() != testErr.Error() {
+			t.Errorf(
+				"expected error %q, got %q",
+				testErr.Error(),
+				got.Error.Error(),
+			)
+		}
+	})
+
+	t.Run("handles missing fields gracefully", func(t *testing.T) {
+		err := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"internal": map[string]any{
+					"request": map[string]any{
+						// missing headers and body
+					},
+				},
+			},
+		}
+
+		got := err.GetInternalExtensions()
+		if got == nil {
+			t.Fatal("expected non-nil internal extensions")
+		}
+
+		if got.Request == nil {
+			t.Fatal("expected non-nil request info")
+		}
+
+		if got.Request.Body != "" {
+			t.Errorf("expected empty body, got %q", got.Request.Body)
+		}
+
+		if got.Request.Headers != nil {
+			t.Errorf("expected nil headers, got %+v", got.Request.Headers)
+		}
+	})
+
+	t.Run("integration with DecorateError", func(t *testing.T) {
+		// Test that errors decorated via DecorateError can be retrieved
+		// via GetInternalExtensions
+		client := graphql.NewClient("http://example.com", nil).WithDebug(true)
+
+		reqBody := `{"query":"{test}"}`
+		respBody := `{"data":null,"errors":[{"message":"error"}]}`
+		req, err := http.NewRequest(http.MethodPost, "http://example.com", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp := &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}
+
+		baseErr := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"code": graphql.ErrRequestError,
+			},
+		}
+
+		decorated := client.DecorateError(
+			baseErr,
+			req,
+			resp,
+			strings.NewReader(reqBody),
+			strings.NewReader(respBody),
+		)
+
+		// Test GetCode()
+		code := decorated.GetCode()
+		if code != graphql.ErrRequestError {
+			t.Errorf("expected code %q, got %q", graphql.ErrRequestError, code)
+		}
+
+		// Test GetInternalExtensions()
+		internal := decorated.GetInternalExtensions()
+		if internal == nil {
+			t.Fatal("expected non-nil internal extensions")
+		}
+
+		// Verify request info
+		if internal.Request == nil {
+			t.Fatal("expected non-nil request info")
+		}
+		if internal.Request.Body != reqBody {
+			t.Errorf("expected request body %q, got %q", reqBody, internal.Request.Body)
+		}
+		if len(internal.Request.Headers) == 0 {
+			t.Error("expected non-empty request headers")
+		}
+
+		// Verify response info
+		if internal.Response == nil {
+			t.Fatal("expected non-nil response info")
+		}
+		if internal.Response.Body != respBody {
+			t.Errorf(
+				"expected response body %q, got %q",
+				respBody,
+				internal.Response.Body,
+			)
+		}
+		if len(internal.Response.Headers) == 0 {
+			t.Error("expected non-empty response headers")
 		}
 	})
 }

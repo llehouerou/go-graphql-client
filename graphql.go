@@ -204,7 +204,7 @@ func (c *Client) request(
 	}
 
 	// Handle JSON decode errors
-	if gqlErrors != nil && len(gqlErrors) > 0 {
+	if len(gqlErrors) > 0 {
 		// Check if it's a decode error (has ErrJsonDecode code)
 		if code, ok := gqlErrors[0].Extensions["code"].(string); ok && code == ErrJsonDecode {
 			we := c.NewRequestError(
@@ -501,6 +501,26 @@ type Error struct {
 	} `json:"locations"`
 }
 
+// RequestInfo contains HTTP request information stored in error extensions.
+type RequestInfo struct {
+	Headers http.Header
+	Body    string
+}
+
+// ResponseInfo contains HTTP response information stored in error extensions.
+type ResponseInfo struct {
+	Headers http.Header
+	Body    string
+}
+
+// InternalExtensions contains internal debugging information stored in error
+// extensions. This information is added when debug mode is enabled.
+type InternalExtensions struct {
+	Request  *RequestInfo
+	Response *ResponseInfo
+	Error    error
+}
+
 // Error implements error interface.
 func (e Error) Error() string {
 	return fmt.Sprintf("Message: %s, Locations: %+v", e.Message, e.Locations)
@@ -513,6 +533,61 @@ func (e Errors) Error() string {
 		b.WriteString(err.Error())
 	}
 	return b.String()
+}
+
+// GetCode returns the error code from the extensions, or an empty string if
+// not present.
+func (e Error) GetCode() string {
+	if e.Extensions == nil {
+		return ""
+	}
+	code, ok := e.Extensions["code"].(string)
+	if !ok {
+		return ""
+	}
+	return code
+}
+
+// GetInternalExtensions returns the typed internal extensions, or nil if not
+// present. Internal extensions contain debugging information added when debug
+// mode is enabled.
+func (e Error) GetInternalExtensions() *InternalExtensions {
+	if e.Extensions == nil {
+		return nil
+	}
+
+	internal, ok := e.Extensions["internal"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	ext := &InternalExtensions{}
+
+	if req, ok := internal["request"].(map[string]any); ok {
+		ext.Request = &RequestInfo{}
+		if headers, ok := req["headers"].(http.Header); ok {
+			ext.Request.Headers = headers
+		}
+		if body, ok := req["body"].(string); ok {
+			ext.Request.Body = body
+		}
+	}
+
+	if resp, ok := internal["response"].(map[string]any); ok {
+		ext.Response = &ResponseInfo{}
+		if headers, ok := resp["headers"].(http.Header); ok {
+			ext.Response.Headers = headers
+		}
+		if body, ok := resp["body"].(string); ok {
+			ext.Response.Body = body
+		}
+	}
+
+	if err, ok := internal["error"].(error); ok {
+		ext.Error = err
+	}
+
+	return ext
 }
 
 func (e Error) getInternalExtension() map[string]any {
