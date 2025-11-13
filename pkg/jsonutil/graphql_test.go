@@ -1080,3 +1080,132 @@ func TestUnmarshalGraphQL_wrapperWithPrimitives(t *testing.T) {
 		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
 	}
 }
+
+// TestUnmarshalGraphQL_nilPointerToWrapper tests that nil pointers to wrapper types
+// don't cause panics. This specifically tests the fix from commit 72c812b which added
+// a guard (if fwrapper.IsValid()) to prevent calling MethodByName on a zero value.
+// The guard protects against the case where after unwrapping pointers/interfaces,
+// we end up with an invalid reflect.Value. This test uses an interface field which
+// can trigger this scenario.
+func TestUnmarshalGraphQL_nilPointerToWrapper(t *testing.T) {
+	type query struct {
+		Data any // interface field that could contain a wrapper
+	}
+	var got query
+	// Test that we can unmarshal without panic when interface contains nil
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"data": null
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Data: nil,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+
+	// Also test pointer to wrapper with deeply nested pointers
+	type query2 struct {
+		Data **Wrapper[string]
+	}
+	var got2 query2
+	err = jsonutil.UnmarshalGraphQL([]byte(`{
+		"data": null
+	}`), &got2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should not panic - the guard prevents calling MethodByName on invalid value
+}
+
+// TestUnmarshalGraphQL_wrapperContainingSlice tests wrapper types that contain slices.
+// This tests the fix from commit 355f4e8 which added wrapper handling in the array
+// processing path, allowing Wrapper[[]T] patterns.
+func TestUnmarshalGraphQL_wrapperContainingSlice(t *testing.T) {
+	type query struct {
+		Items Wrapper[[]string]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"items": ["first", "second", "third"]
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Items: Wrapper[[]string]{
+			Value: []string{"first", "second", "third"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_sliceOfWrappers tests slices containing wrapper types.
+// This verifies that []Wrapper[T] patterns work correctly with the wrapper
+// unwrapping logic from commit 355f4e8. Since wrappers are structs, the JSON
+// must contain objects with the wrapper's structure.
+func TestUnmarshalGraphQL_sliceOfWrappers(t *testing.T) {
+	type query struct {
+		Items []Wrapper[string]
+	}
+	got := query{
+		Items: []Wrapper[string]{{}}, // Template for array unmarshaling
+	}
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"items": [
+			{"value": "first"},
+			{"value": "second"},
+			{"value": "third"}
+		]
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Items: []Wrapper[string]{
+			{Value: "first"},
+			{Value: "second"},
+			{Value: "third"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_wrapperContainingComplexSlice tests wrapper containing
+// a slice of structs, combining both features from commit 355f4e8.
+func TestUnmarshalGraphQL_wrapperContainingComplexSlice(t *testing.T) {
+	type Person struct {
+		Name string
+		Age  int
+	}
+	type query struct {
+		Users Wrapper[[]Person]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"users": [
+			{"name": "Alice", "age": 30},
+			{"name": "Bob", "age": 25}
+		]
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Users: Wrapper[[]Person]{
+			Value: []Person{
+				{Name: "Alice", Age: 30},
+				{Name: "Bob", Age: 25},
+			},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
