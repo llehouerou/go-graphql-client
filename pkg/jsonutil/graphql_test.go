@@ -1209,3 +1209,40 @@ func TestUnmarshalGraphQL_wrapperContainingComplexSlice(t *testing.T) {
 		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
 	}
 }
+
+// TestUnmarshalGraphQL_arrayWithInterfaceField tests that arrays containing
+// structs with interface fields don't panic in popLeftArrayTemplates.
+// This regression test ensures we properly handle interface types when removing
+// array template elements (fix for panic: reflect: call of reflect.Value.Len on interface Value).
+func TestUnmarshalGraphQL_arrayWithInterfaceField(t *testing.T) {
+	type Item struct {
+		Name string
+		Data any // interface field
+	}
+	type query struct {
+		Items []Item
+	}
+	got := query{
+		Items: []Item{{}}, // Template for array unmarshaling
+	}
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"items": [
+			{"name": "first", "data": "string value"},
+			{"name": "second", "data": 42},
+			{"name": "third", "data": null}
+		]
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Items: []Item{
+			{Name: "first", Data: "string value"},
+			{Name: "second", Data: float64(42)}, // JSON numbers are float64
+			{Name: "third", Data: nil},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}

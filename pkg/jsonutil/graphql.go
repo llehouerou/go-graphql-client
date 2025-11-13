@@ -547,7 +547,12 @@ func (d *decoder) popAllVs() {
 func (d *decoder) popLeftArrayTemplates() {
 	for i := range d.vs {
 		v := d.vs[i].Top()
-		if v.IsValid() {
+		// Unwrap pointers and interfaces to get to the actual slice
+		for v.IsValid() && (v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface) {
+			v = v.Elem()
+		}
+		// Only call Slice if it's actually a slice type
+		if v.IsValid() && v.Kind() == reflect.Slice {
 			v.Set(v.Slice(1, v.Len()))
 		}
 	}
