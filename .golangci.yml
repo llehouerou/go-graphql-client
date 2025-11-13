@@ -14,6 +14,7 @@ linters:
     - unused
     - misspell
     - unconvert
+    - unparam
 
   settings:
     errcheck:

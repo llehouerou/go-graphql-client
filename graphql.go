@@ -109,7 +109,7 @@ func (c *Client) buildAndRequest(
 		return nil, nil, nil, Errors{newError(ErrGraphQLEncode, err)}
 	}
 
-	return c.request(ctx, query, variables, options...)
+	return c.request(ctx, query, variables)
 }
 
 // Request the common method that send graphql request
@@ -117,7 +117,6 @@ func (c *Client) request(
 	ctx context.Context,
 	query string,
 	variables any,
-	options ...Option,
 ) ([]byte, *http.Response, io.Reader, Errors) {
 	// Build HTTP request with JSON body
 	request, reqBody, err := c.BuildRequest(ctx, query, variables)
@@ -378,7 +377,7 @@ func (c *Client) Exec(
 	variables map[string]any,
 	options ...Option,
 ) error {
-	data, resp, respBuf, errs := c.request(ctx, query, variables, options...)
+	data, resp, respBuf, errs := c.request(ctx, query, variables)
 	return c.processResponse(v, data, resp, respBuf, errs)
 }
 
@@ -390,7 +389,7 @@ func (c *Client) ExecRaw(
 	variables map[string]any,
 	options ...Option,
 ) ([]byte, error) {
-	data, _, _, errs := c.request(ctx, query, variables, options...)
+	data, _, _, errs := c.request(ctx, query, variables)
 	if len(errs) > 0 {
 		return data, errs
 	}
