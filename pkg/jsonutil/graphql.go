@@ -283,9 +283,7 @@ func (d *decoder) findFieldsForKey(
 
 	for i := range d.vs {
 		v := d.vs[i].Top()
-		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-			v = v.Elem()
-		}
+		v = reflectutil.UnwrapToConcreteValue(v)
 
 		var f reflect.Value
 		var scalar bool
@@ -400,9 +398,8 @@ func (d *decoder) decodeArrayValue() error {
 	someSliceExist := false
 	for i := range d.vs {
 		v := d.vs[i].Top()
-		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-			v = v.Elem()
-		}
+		v = reflectutil.UnwrapToConcreteValue(v)
+
 		// Check if this is a wrapper type (has GetGraphQLWrapped method).
 		// If so, unwrap to get the actual slice field per "Value" convention.
 		if v.IsValid() {
@@ -478,9 +475,8 @@ func (d *decoder) decodeObjectStart() {
 	for len(frontier) > 0 {
 		v := frontier[0]
 		frontier = frontier[1:]
-		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-			v = v.Elem()
-		}
+		v = reflectutil.UnwrapToConcreteValue(v)
+
 		if v.Kind() == reflect.Struct {
 			for i := 0; i < v.NumField(); i++ {
 				field := v.Type().Field(i)
@@ -532,9 +528,8 @@ func (d *decoder) decodeArrayStart() error {
 		//}
 
 		// Reset slice to empty (in case it had non-zero initial value).
-		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-			v = v.Elem()
-		}
+		v = reflectutil.UnwrapToConcreteValue(v)
+
 		if v.Kind() != reflect.Slice {
 			continue
 		}
@@ -633,9 +628,8 @@ func (d *decoder) popLeftArrayTemplates() {
 	for i := range d.vs {
 		v := d.vs[i].Top()
 		// Unwrap pointers and interfaces to get to the actual slice
-		for v.IsValid() && (v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface) {
-			v = v.Elem()
-		}
+		v = reflectutil.UnwrapToConcreteValue(v)
+
 		// Only call Slice if it's actually a slice type
 		if v.IsValid() && v.Kind() == reflect.Slice {
 			v.Set(v.Slice(1, v.Len()))
