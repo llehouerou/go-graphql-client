@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/llehouerou/go-graphql-client/internal/reflectutil"
+	"github.com/llehouerou/go-graphql-client/internal/tagparser"
 	"github.com/llehouerou/go-graphql-client/types"
 )
 
@@ -666,18 +667,20 @@ func hasGraphQLName(f reflect.StructField, v reflect.Value, name string) bool {
 }
 
 func keyHasGraphQLName(value, name string) bool {
-	value = strings.TrimSpace(value) // TODO: Parse better.
-	if strings.HasPrefix(value, types.FragmentPrefix) {
+	parsed, err := tagparser.ParseGraphQLTag(value)
+	if err != nil {
+		return false
+	}
+	if parsed.IsFragment {
 		// GraphQL fragment. It doesn't have a name.
 		return false
 	}
-	if i := strings.Index(value, "("); i != -1 {
-		value = value[:i]
+	// When there's an alias, the response uses the alias name.
+	// Otherwise, it uses the field name.
+	if parsed.Alias != "" {
+		return parsed.Alias == name
 	}
-	if i := strings.Index(value, ":"); i != -1 {
-		value = value[:i]
-	}
-	return strings.TrimSpace(value) == name
+	return parsed.FieldName == name
 }
 
 // isGraphQLFragment reports whether struct field f is a GraphQL fragment.
@@ -691,27 +694,25 @@ func isGraphQLFragment(f reflect.StructField) bool {
 
 // isGraphQLFragment reports whether ordered map kv pair f is a GraphQL fragment.
 func keyForGraphQLFragment(value string) bool {
-	value = strings.TrimSpace(value) // TODO: Parse better.
-	return strings.HasPrefix(value, types.FragmentPrefix)
+	parsed, err := tagparser.ParseGraphQLTag(value)
+	if err != nil {
+		return false
+	}
+	return parsed.IsFragment
 }
 
 // extractFragmentTypename extracts the typename from a GraphQL fragment tag.
 // For example, "... on SolanaTokenTransferAuthorizationRequest" returns "SolanaTokenTransferAuthorizationRequest".
 // Returns empty string if not a valid fragment tag.
 func extractFragmentTypename(tag string) string {
-	tag = strings.TrimSpace(tag)
-	if !strings.HasPrefix(tag, types.FragmentPrefix) {
+	parsed, err := tagparser.ParseGraphQLTag(tag)
+	if err != nil {
 		return ""
 	}
-	// Remove "..." prefix
-	tag = strings.TrimSpace(tag[len(types.FragmentPrefix):])
-	// Check for "on " prefix
-	if !strings.HasPrefix(tag, "on ") {
+	if !parsed.IsFragment {
 		return ""
 	}
-	// Extract typename after "on "
-	typename := strings.TrimSpace(tag[len("on "):])
-	return typename
+	return parsed.TypeName
 }
 
 // unmarshalValue unmarshals JSON value into v.
