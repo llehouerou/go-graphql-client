@@ -195,32 +195,59 @@ func queryArguments(variables any) string {
 		if typ.Kind() != reflect.Struct {
 			panic(fmt.Sprintf("variables must be a struct or a map; got %T", variables))
 		}
+
+		// Collect field information in a single pass
+		type fieldInfo struct {
+			jsonName  string
+			fieldType reflect.Type
+			value     reflect.Value
+		}
+		var fields []fieldInfo
+
 		for i := 0; i < val.NumField(); i++ {
 			field := typ.Field(i)
-			jsonTag := field.Tag.Get("json")
-			if jsonTag == "" {
+
+			// Skip unexported fields
+			if field.PkgPath != "" {
 				continue
 			}
+
+			jsonTag := field.Tag.Get("json")
+
+			// Skip fields without json tag or with json:"-"
+			if jsonTag == "" || jsonTag == "-" {
+				continue
+			}
+
+			// Extract field name from json tag (before comma if present)
 			jsonName := jsonTag
 			if commaIdx := bytes.IndexByte([]byte(jsonTag), ','); commaIdx > -1 {
 				jsonName = jsonTag[:commaIdx]
 			}
-			if field.PkgPath != "" {
+
+			// Skip if field name is empty after extraction
+			if jsonName == "" || jsonName == "-" {
 				continue
 			}
-			keys = append(keys, jsonName)
-		}
-		sort.Strings(keys)
-		for _, jsonName := range keys {
-			field, _ := typ.FieldByNameFunc(func(s string) bool {
-				field, _ := typ.FieldByName(s)
-				return field.Tag.Get("json") == jsonName
+
+			fields = append(fields, fieldInfo{
+				jsonName:  jsonName,
+				fieldType: field.Type,
+				value:     val.Field(i),
 			})
-			value := val.FieldByName(field.Name)
+		}
+
+		// Sort fields by json name for deterministic output
+		sort.Slice(fields, func(i, j int) bool {
+			return fields[i].jsonName < fields[j].jsonName
+		})
+
+		// Build the arguments string
+		for _, f := range fields {
 			_, _ = io.WriteString(&buf, "$")
-			_, _ = io.WriteString(&buf, jsonName)
+			_, _ = io.WriteString(&buf, f.jsonName)
 			_, _ = io.WriteString(&buf, ":")
-			writeArgumentType(&buf, field.Type, value.Interface(), true)
+			writeArgumentType(&buf, f.fieldType, f.value.Interface(), true)
 		}
 	}
 

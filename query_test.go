@@ -911,7 +911,7 @@ func TestQueryArguments_StructVariables(t *testing.T) {
 			want: "$active:Boolean!$name:String!",
 		},
 		{
-			name: "struct with json:- tag (treated as field named '-')",
+			name: "struct with json:- tag (should skip)",
 			in: struct {
 				Name     string `json:"name"`
 				Internal string `json:"-"`
@@ -921,8 +921,50 @@ func TestQueryArguments_StructVariables(t *testing.T) {
 				Internal: "secret",
 				Active:   true,
 			},
-			// Note: This is a bug - json:"-" should be skipped but isn't in e2d1096
-			want: "$-:String!$active:Boolean!$name:String!",
+			want: "$active:Boolean!$name:String!",
+		},
+		{
+			name: "struct with json tag options (should extract field name only)",
+			in: struct {
+				Name     string `json:"name,omitempty"`
+				Age      int    `json:"age,string"`
+				Active   bool   `json:"active,omitempty"`
+				Optional *int   `json:"optional,omitempty"`
+			}{
+				Name:     "John",
+				Age:      30,
+				Active:   true,
+				Optional: &iVal,
+			},
+			want: "$active:Boolean!$age:Int!$name:String!$optional:Int",
+		},
+		{
+			name: "struct with empty field name in tag (should skip)",
+			in: struct {
+				Name   string `json:"name"`
+				Empty  string `json:",omitempty"` // Empty field name
+				Active bool   `json:"active"`
+			}{
+				Name:   "John",
+				Empty:  "ignored",
+				Active: true,
+			},
+			want: "$active:Boolean!$name:String!",
+		},
+		{
+			name: "struct with multiple json:- tags",
+			in: struct {
+				Name      string `json:"name"`
+				Internal1 string `json:"-"`
+				Internal2 int    `json:"-"`
+				Active    bool   `json:"active"`
+			}{
+				Name:      "John",
+				Internal1: "secret",
+				Internal2: 42,
+				Active:    true,
+			},
+			want: "$active:Boolean!$name:String!",
 		},
 		{
 			name: "struct with simple fields only",
