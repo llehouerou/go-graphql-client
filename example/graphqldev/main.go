@@ -17,6 +17,7 @@ import (
 	graphqlserver "github.com/graph-gophers/graphql-go"
 	"github.com/graph-gophers/graphql-go/example/starwars"
 	"github.com/graph-gophers/graphql-go/relay"
+
 	graphql "github.com/llehouerou/go-graphql-client"
 )
 
@@ -31,14 +32,20 @@ func main() {
 
 func run() error {
 	// Set up a GraphQL server.
-	schema, err := graphqlserver.ParseSchema(starwars.Schema, &starwars.Resolver{})
+	schema, err := graphqlserver.ParseSchema(
+		starwars.Schema,
+		&starwars.Resolver{},
+	)
 	if err != nil {
 		return err
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/query", &relay.Handler{Schema: schema})
 
-	client := graphql.NewClient("/query", &http.Client{Transport: localRoundTripper{handler: mux}})
+	client := graphql.NewClient(
+		"/query",
+		&http.Client{Transport: localRoundTripper{handler: mux}},
+	)
 
 	/*
 		query {
@@ -98,7 +105,9 @@ type localRoundTripper struct {
 	handler http.Handler
 }
 
-func (l localRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (l localRoundTripper) RoundTrip(
+	req *http.Request,
+) (*http.Response, error) {
 	w := httptest.NewRecorder()
 	l.handler.ServeHTTP(w, req)
 	return w.Result(), nil

@@ -204,25 +204,33 @@ func TestSubscriptionLifeCycle(t *testing.T) {
 		} `graphql:"helloSaid" json:"helloSaid"`
 	}
 
-	_, err := subscriptionClient.Subscribe(sub, nil, func(data []byte, e error) error {
-		if e != nil {
-			t.Fatalf("got error: %v, want: nil", e)
-			return nil
-		}
+	_, err := subscriptionClient.Subscribe(
+		sub,
+		nil,
+		func(data []byte, e error) error {
+			if e != nil {
+				t.Fatalf("got error: %v, want: nil", e)
+				return nil
+			}
 
-		log.Println("result", string(data))
-		e = json.Unmarshal(data, &sub)
-		if e != nil {
-			t.Fatalf("got error: %v, want: nil", e)
-			return nil
-		}
+			log.Println("result", string(data))
+			e = json.Unmarshal(data, &sub)
+			if e != nil {
+				t.Fatalf("got error: %v, want: nil", e)
+				return nil
+			}
 
-		if sub.HelloSaid.Message != String(msg) {
-			t.Fatalf("subscription message does not match. got: %s, want: %s", sub.HelloSaid.Message, msg)
-		}
+			if sub.HelloSaid.Message != String(msg) {
+				t.Fatalf(
+					"subscription message does not match. got: %s, want: %s",
+					sub.HelloSaid.Message,
+					msg,
+				)
+			}
 
-		return errors.New("exit")
-	})
+			return errors.New("exit")
+		},
+	)
 
 	if err != nil {
 		t.Fatalf("got error: %v, want: nil", err)
@@ -258,7 +266,12 @@ func TestSubscriptionLifeCycle(t *testing.T) {
 	variables := map[string]any{
 		"msg": String(msg),
 	}
-	err = client.Mutate(context.Background(), &q, variables, OperationName("SayHello"))
+	err = client.Mutate(
+		context.Background(),
+		&q,
+		variables,
+		OperationName("SayHello"),
+	)
 	if err != nil {
 		t.Fatalf("got error: %v, want: nil", err)
 	}
@@ -284,7 +297,8 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 		OnError(func(sc *SubscriptionClient, err error) error {
 			// Ignore errors related to graceful shutdown (closed connections)
 			// These are expected when subscriptions stop
-			if err != nil && strings.Contains(err.Error(), "closed network connection") {
+			if err != nil &&
+				strings.Contains(err.Error(), "closed network connection") {
 				return nil
 			}
 			if err != nil && strings.Contains(err.Error(), "use of closed") {
@@ -311,25 +325,33 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 		} `graphql:"helloSaid" json:"helloSaid"`
 	}
 
-	subId1, err := subscriptionClient.Subscribe(sub, nil, func(data []byte, e error) error {
-		if e != nil {
-			t.Fatalf("got error: %v, want: nil", e)
+	subId1, err := subscriptionClient.Subscribe(
+		sub,
+		nil,
+		func(data []byte, e error) error {
+			if e != nil {
+				t.Fatalf("got error: %v, want: nil", e)
+				return nil
+			}
+
+			log.Println("result", string(data))
+			e = json.Unmarshal(data, &sub)
+			if e != nil {
+				t.Fatalf("got error: %v, want: nil", e)
+				return nil
+			}
+
+			if sub.HelloSaid.Message != String(msg) {
+				t.Fatalf(
+					"subscription message does not match. got: %s, want: %s",
+					sub.HelloSaid.Message,
+					msg,
+				)
+			}
+
 			return nil
-		}
-
-		log.Println("result", string(data))
-		e = json.Unmarshal(data, &sub)
-		if e != nil {
-			t.Fatalf("got error: %v, want: nil", e)
-			return nil
-		}
-
-		if sub.HelloSaid.Message != String(msg) {
-			t.Fatalf("subscription message does not match. got: %s, want: %s", sub.HelloSaid.Message, msg)
-		}
-
-		return nil
-	})
+		},
+	)
 
 	if err != nil {
 		t.Fatalf("got error: %v, want: nil", err)
@@ -349,25 +371,33 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 		} `graphql:"helloSaid" json:"helloSaid"`
 	}
 
-	_, err = subscriptionClient.Subscribe(sub2, nil, func(data []byte, e error) error {
-		if e != nil {
-			t.Fatalf("got error: %v, want: nil", e)
-			return nil
-		}
+	_, err = subscriptionClient.Subscribe(
+		sub2,
+		nil,
+		func(data []byte, e error) error {
+			if e != nil {
+				t.Fatalf("got error: %v, want: nil", e)
+				return nil
+			}
 
-		log.Println("result", string(data))
-		e = json.Unmarshal(data, &sub2)
-		if e != nil {
-			t.Fatalf("got error: %v, want: nil", e)
-			return nil
-		}
+			log.Println("result", string(data))
+			e = json.Unmarshal(data, &sub2)
+			if e != nil {
+				t.Fatalf("got error: %v, want: nil", e)
+				return nil
+			}
 
-		if sub2.HelloSaid.Message != String(msg) {
-			t.Fatalf("subscription message does not match. got: %s, want: %s", sub2.HelloSaid.Message, msg)
-		}
+			if sub2.HelloSaid.Message != String(msg) {
+				t.Fatalf(
+					"subscription message does not match. got: %s, want: %s",
+					sub2.HelloSaid.Message,
+					msg,
+				)
+			}
 
-		return ErrSubscriptionStopped
-	})
+			return ErrSubscriptionStopped
+		},
+	)
 
 	if err != nil {
 		t.Fatalf("got error: %v, want: nil", err)
@@ -395,7 +425,12 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 		variables := map[string]any{
 			"msg": String(msg),
 		}
-		err = client.Mutate(context.Background(), &q, variables, OperationName("SayHello"))
+		err = client.Mutate(
+			context.Background(),
+			&q,
+			variables,
+			OperationName("SayHello"),
+		)
 		if err != nil {
 			t.Errorf("got error: %v, want: nil", err)
 			return

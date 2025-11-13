@@ -85,7 +85,11 @@ func (s stack) Pop() stack {
 // based on the current typename. Returns true if:
 // - No typename is set (backward compatibility: include all fragments)
 // - The fragment's typename matches the current typename
-func (d *decoder) shouldIncludeFragment(field reflect.StructField) bool { //nolint:unused // Reserved for future use
+//
+//nolint:unused // Reserved for future use
+func (d *decoder) shouldIncludeFragment(
+	field reflect.StructField,
+) bool {
 	tag, ok := field.Tag.Lookup("graphql")
 	if !ok {
 		return true
@@ -94,7 +98,11 @@ func (d *decoder) shouldIncludeFragment(field reflect.StructField) bool { //noli
 }
 
 // shouldIncludeFragmentByTag determines if a fragment with the given tag should be included.
-func (d *decoder) shouldIncludeFragmentByTag(tag string) bool { //nolint:unused // Reserved for future use
+//
+//nolint:unused // Reserved for future use
+func (d *decoder) shouldIncludeFragmentByTag(
+	tag string,
+) bool {
 	// If no typename is set, include all fragments (backward compatibility)
 	if d.currentTypename == "" {
 		return true
@@ -201,11 +209,16 @@ func (d *decoder) decode() error {
 				}
 
 				fragmentMatch := true
-				if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" && d.currentTypename != "" {
+				if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" &&
+					d.currentTypename != "" {
 					fragmentMatch = d.fragmentTypes[i] == d.currentTypename
 				}
 
-				fields[i] = fieldInfo{field: f, isScalar: scalar, fragmentMatch: fragmentMatch}
+				fields[i] = fieldInfo{
+					field:         f,
+					isScalar:      scalar,
+					fragmentMatch: fragmentMatch,
+				}
 
 				if f.IsValid() && fragmentMatch {
 					hasMatchingFragmentWithField = true
@@ -226,14 +239,19 @@ func (d *decoder) decode() error {
 				// Skip this field if:
 				// 1. It's from a non-matching fragment AND
 				// 2. A matching fragment also has this field
-				if f.IsValid() && !fields[i].fragmentMatch && hasMatchingFragmentWithField {
+				if f.IsValid() && !fields[i].fragmentMatch &&
+					hasMatchingFragmentWithField {
 					f = reflect.Value{}
 				}
 
 				d.vs[i] = append(d.vs[i], f)
 			}
 			if !someFieldExist {
-				return fmt.Errorf("struct field for %q doesn't exist in any of %v places to unmarshal", key, len(d.vs))
+				return fmt.Errorf(
+					"struct field for %q doesn't exist in any of %v places to unmarshal",
+					key,
+					len(d.vs),
+				)
 			}
 
 			if rawMessage || isScalar {
@@ -289,7 +307,10 @@ func (d *decoder) decode() error {
 				d.vs[i] = append(d.vs[i], f)
 			}
 			if !someSliceExist {
-				return fmt.Errorf("slice doesn't exist in any of %v places to unmarshal", len(d.vs))
+				return fmt.Errorf(
+					"slice doesn't exist in any of %v places to unmarshal",
+					len(d.vs),
+				)
 			}
 		}
 
@@ -507,7 +528,10 @@ func (d *decoder) popLeftArrayTemplates() {
 
 // fieldByGraphQLName returns an exported struct field of struct v
 // that matches GraphQL name, or invalid reflect.Value if none found.
-func fieldByGraphQLName(v reflect.Value, name string) (val reflect.Value, taggedAsScalar bool) {
+func fieldByGraphQLName(
+	v reflect.Value,
+	name string,
+) (val reflect.Value, taggedAsScalar bool) {
 	for i := 0; i < v.NumField(); i++ {
 		if v.Type().Field(i).PkgPath != "" {
 			// Skip unexported field.
@@ -617,7 +641,9 @@ func extractFragmentTypename(tag string) string {
 // v must be addressable and not obtained by the use of unexported
 // struct fields, otherwise unmarshalValue will panic.
 func unmarshalValue(value any, v reflect.Value) error {
-	b, err := json.Marshal(value) // TODO: Short-circuit (if profiling says it's worth it).
+	b, err := json.Marshal(
+		value,
+	) // TODO: Short-circuit (if profiling says it's worth it).
 	if err != nil {
 		return err
 	}

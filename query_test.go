@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/llehouerou/go-graphql-client/types"
-
 	"github.com/google/uuid"
+
+	"github.com/llehouerou/go-graphql-client/types"
 )
 
 type cachedDirective struct {
@@ -637,7 +637,11 @@ func TestConstructSubscription(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		got, err := ConstructSubscription(tc.inV, tc.inVariables, OperationName(tc.name))
+		got, err := ConstructSubscription(
+			tc.inV,
+			tc.inVariables,
+			OperationName(tc.name),
+		)
 		if err != nil {
 			t.Error(err)
 		} else if got != tc.want {
@@ -670,19 +674,45 @@ func TestQueryArguments(t *testing.T) {
 			want: "$a:Int!$b:Boolean",
 		},
 		{
-			in:   map[string]any{"a": iVal, "b": i8Val, "c": i16Val, "d": i32Val, "e": i64Val, "f": Int(123)},
+			in: map[string]any{
+				"a": iVal,
+				"b": i8Val,
+				"c": i16Val,
+				"d": i32Val,
+				"e": i64Val,
+				"f": Int(123),
+			},
 			want: "$a:Int!$b:Int!$c:Int!$d:Int!$e:Int!$f:Int!",
 		},
 		{
-			in:   map[string]any{"a": &iVal, "b": &i8Val, "c": &i16Val, "d": &i32Val, "e": &i64Val, "f": NewInt(123)},
+			in: map[string]any{
+				"a": &iVal,
+				"b": &i8Val,
+				"c": &i16Val,
+				"d": &i32Val,
+				"e": &i64Val,
+				"f": NewInt(123),
+			},
 			want: "$a:Int$b:Int$c:Int$d:Int$e:Int$f:Int",
 		},
 		{
-			in:   map[string]any{"a": uiVal, "b": ui8Val, "c": ui16Val, "d": ui32Val, "e": ui64Val},
+			in: map[string]any{
+				"a": uiVal,
+				"b": ui8Val,
+				"c": ui16Val,
+				"d": ui32Val,
+				"e": ui64Val,
+			},
 			want: "$a:Int!$b:Int!$c:Int!$d:Int!$e:Int!",
 		},
 		{
-			in:   map[string]any{"a": &uiVal, "b": &ui8Val, "c": &ui16Val, "d": &ui32Val, "e": &ui64Val},
+			in: map[string]any{
+				"a": &uiVal,
+				"b": &ui8Val,
+				"c": &ui16Val,
+				"d": &ui32Val,
+				"e": &ui64Val,
+			},
 			want: "$a:Int$b:Int$c:Int$d:Int$e:Int",
 		},
 		{
@@ -694,7 +724,14 @@ func TestQueryArguments(t *testing.T) {
 			want: "$a:Float$b:Float$c:Float",
 		},
 		{
-			in:   map[string]any{"a": &bVal, "b": bVal, "c": true, "d": false, "e": Boolean(true), "f": NewBoolean(true)},
+			in: map[string]any{
+				"a": &bVal,
+				"b": bVal,
+				"c": true,
+				"d": false,
+				"e": Boolean(true),
+				"f": NewBoolean(true),
+			},
 			want: "$a:Boolean$b:Boolean!$c:Boolean!$d:Boolean!$e:Boolean!$f:Boolean",
 		},
 		{
@@ -702,7 +739,12 @@ func TestQueryArguments(t *testing.T) {
 			want: "$a:ID$b:ID!",
 		},
 		{
-			in:   map[string]any{"a": sVal, "b": &sVal, "c": String("foo"), "d": NewString("bar")},
+			in: map[string]any{
+				"a": sVal,
+				"b": &sVal,
+				"c": String("foo"),
+				"d": NewString("bar"),
+			},
 			want: "$a:String!$b:String$c:String!$d:String",
 		},
 		{
@@ -803,7 +845,11 @@ func TestDynamicCustomType_GetGraphQLType(t *testing.T) {
 	const hintType = "UUID"
 	ct := newCustomTypeHint(stringStringer("test"), hintType)
 	if ct.GetGraphQLType() != hintType {
-		t.Errorf("custom type hint:\n got: %s\nwant: %s", ct.GetGraphQLType(), hintType)
+		t.Errorf(
+			"custom type hint:\n got: %s\nwant: %s",
+			ct.GetGraphQLType(),
+			hintType,
+		)
 	}
 
 	var query gqlGetRowsQuery
@@ -819,7 +865,11 @@ func TestDynamicCustomType_GetGraphQLType(t *testing.T) {
 		t.Errorf("construct custom type hint error:\n %s", err)
 	}
 	if !strings.Contains(constructQuery, hintType) {
-		t.Errorf("custom type hint:\n the constructed query doesn't contain %s\n%s", hintType, constructQuery)
+		t.Errorf(
+			"custom type hint:\n the constructed query doesn't contain %s\n%s",
+			hintType,
+			constructQuery,
+		)
 	}
 }
 
@@ -900,9 +950,9 @@ func TestGraphQLTypeInterface_StructFields(t *testing.T) {
 	t.Run("MultipleCustomFields", func(t *testing.T) {
 		query := struct {
 			Repository struct {
-				Owner      string
-				Review1    UserReview
-				Review2    UserReview
+				Owner       string
+				Review1     UserReview
+				Review2     UserReview
 				ReviewInput UserReviewInput
 			} `graphql:"repository(owner: \"test\")"`
 		}{}

@@ -22,11 +22,14 @@ make test-verbose
 # Run tests with coverage report (generates coverage.html)
 make test-coverage
 
-# Run linters (golangci-lint if available, otherwise go vet)
+# Run linters (golangci-lint with custom config)
 make lint
 
-# Format code
+# Format code with gofmt
 make fmt
+
+# Format code with golines (80 char lines, uses goimports-reviser)
+make format
 
 # Run go vet
 make vet
@@ -73,6 +76,46 @@ go run ./example/graphqldev/main.go
 # Run realworld example
 go run ./example/realworld/main.go
 ```
+
+## Code Quality & Modernization
+
+This project uses modern Go practices and tooling:
+
+### Go Version
+- **Minimum**: Go 1.25
+- Uses modern Go features: `any` type alias, `io.ReadAll`, `reflect.PointerTo`
+
+### Code Formatting
+- **golines**: Enforces 80-character line limits with automatic wrapping
+  - Command: `make format`
+  - Config: Uses `goimports-reviser` as base formatter, preserves struct tags
+  - Applied across entire codebase for consistency
+
+### Linting
+- **golangci-lint v2.6**: Comprehensive static analysis
+  - Config: `.golangci.yml` (version 2 format)
+  - Enabled linters: errcheck, govet, ineffassign, staticcheck, unused, misspell, unconvert
+  - Custom exclusions for test files and examples
+  - Disabled overly strict checks (shadow, naming conventions that would break API)
+
+### Dependencies
+All dependencies updated to latest stable versions:
+- `google/uuid`: v1.6.0
+- `nhooyr.io/websocket`: v1.8.17 (marked for migration to coder/websocket)
+- `graph-gophers/graphql-go`: v1.8.0
+- `gorilla/websocket`: v1.5.3
+
+### Deprecated Patterns Removed
+- ✅ Replaced `io/ioutil` with `io` package (deprecated since Go 1.16)
+- ✅ Replaced `interface{}` with `any` (162 occurrences across 10 files)
+- ✅ Replaced `reflect.PtrTo()` with `reflect.PointerTo()` (deprecated since Go 1.22)
+- ✅ Fixed all linter issues (36 errcheck, 11 staticcheck, 8 unused)
+- ✅ Fixed comment typos (identifier, compatibility)
+
+### Error Handling
+- Explicit error handling using blank identifier (`_ =`) where appropriate
+- Proper error bubbling in cleanup paths (e.g., `subscription.Close()`)
+- Uses `//nolint` directives with explanations for intentional suppressions
 
 ## Architecture
 

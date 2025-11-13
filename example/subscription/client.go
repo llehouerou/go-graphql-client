@@ -75,7 +75,10 @@ func startSubscription() error {
 // send hello mutations to the graphql server, so the subscription client can receive messages
 func startSendHello() {
 
-	client := graphql.NewClient(getServerEndpoint(), &http.Client{Transport: http.DefaultTransport})
+	client := graphql.NewClient(
+		getServerEndpoint(),
+		&http.Client{Transport: http.DefaultTransport},
+	)
 	// stop until the subscription client is connected
 	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
@@ -96,7 +99,12 @@ func startSendHello() {
 		variables := map[string]interface{}{
 			"msg": randomID(),
 		}
-		err := client.Mutate(context.Background(), &q, variables, graphql.OperationName("SayHello"))
+		err := client.Mutate(
+			context.Background(),
+			&q,
+			variables,
+			graphql.OperationName("SayHello"),
+		)
 		if err != nil {
 			fmt.Println(err)
 		}

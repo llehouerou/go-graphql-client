@@ -42,14 +42,24 @@ func NewClient(url string, httpClient *http.Client) *Client {
 // Query executes a single GraphQL query request,
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
-func (c *Client) Query(ctx context.Context, q any, variables any, options ...Option) error {
+func (c *Client) Query(
+	ctx context.Context,
+	q any,
+	variables any,
+	options ...Option,
+) error {
 	return c.do(ctx, queryOperation, q, variables, options...)
 }
 
 // Mutate executes a single GraphQL mutation request,
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
-func (c *Client) Mutate(ctx context.Context, m any, variables any, options ...Option) error {
+func (c *Client) Mutate(
+	ctx context.Context,
+	m any,
+	variables any,
+	options ...Option,
+) error {
 	return c.do(ctx, mutationOperation, m, variables, options...)
 }
 
@@ -57,7 +67,12 @@ func (c *Client) Mutate(ctx context.Context, m any, variables any, options ...Op
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
 // return raw bytes message.
-func (c *Client) QueryRaw(ctx context.Context, q any, variables any, options ...Option) ([]byte, error) {
+func (c *Client) QueryRaw(
+	ctx context.Context,
+	q any,
+	variables any,
+	options ...Option,
+) ([]byte, error) {
 	return c.doRaw(ctx, queryOperation, q, variables, options...)
 }
 
@@ -65,12 +80,23 @@ func (c *Client) QueryRaw(ctx context.Context, q any, variables any, options ...
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
 // return raw bytes message.
-func (c *Client) MutateRaw(ctx context.Context, m any, variables any, options ...Option) ([]byte, error) {
+func (c *Client) MutateRaw(
+	ctx context.Context,
+	m any,
+	variables any,
+	options ...Option,
+) ([]byte, error) {
 	return c.doRaw(ctx, mutationOperation, m, variables, options...)
 }
 
 // buildAndRequest the common method that builds and send graphql request
-func (c *Client) buildAndRequest(ctx context.Context, op operationType, v any, variables any, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
+func (c *Client) buildAndRequest(
+	ctx context.Context,
+	op operationType,
+	v any,
+	variables any,
+	options ...Option,
+) ([]byte, *http.Response, io.Reader, Errors) {
 	var query string
 	var err error
 	switch op {
@@ -88,7 +114,12 @@ func (c *Client) buildAndRequest(ctx context.Context, op operationType, v any, v
 }
 
 // Request the common method that send graphql request
-func (c *Client) request(ctx context.Context, query string, variables any, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
+func (c *Client) request(
+	ctx context.Context,
+	query string,
+	variables any,
+	options ...Option,
+) ([]byte, *http.Response, io.Reader, Errors) {
 	if variables != nil {
 		reflectVal := reflect.ValueOf(variables)
 		if reflectVal.Kind() == reflect.Map && reflectVal.Len() == 0 {
@@ -109,9 +140,17 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 	}
 
 	reqReader := bytes.NewReader(buf.Bytes())
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, reqReader)
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.url,
+		reqReader,
+	)
 	if err != nil {
-		e := newError(ErrRequestError, fmt.Errorf("problem constructing request: %w", err))
+		e := newError(
+			ErrRequestError,
+			fmt.Errorf("problem constructing request: %w", err),
+		)
 		if c.debug {
 			e = e.withRequest(request, reqReader)
 		}
@@ -126,7 +165,10 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 	resp, err := c.httpClient.Do(request)
 
 	if c.debug {
-		_, _ = reqReader.Seek(0, io.SeekStart) // Ignore seek errors for debug logging
+		_, _ = reqReader.Seek(
+			0,
+			io.SeekStart,
+		) // Ignore seek errors for debug logging
 	}
 
 	if err != nil {
@@ -143,7 +185,12 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gr, err := gzip.NewReader(r)
 		if err != nil {
-			return nil, nil, nil, Errors{newError(ErrJsonDecode, fmt.Errorf("problem trying to create gzip reader: %w", err))}
+			return nil, nil, nil, Errors{
+				newError(
+					ErrJsonDecode,
+					fmt.Errorf("problem trying to create gzip reader: %w", err),
+				),
+			}
 		}
 		defer func() { _ = gr.Close() }()
 		r = gr
@@ -151,7 +198,10 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		err := newError(ErrRequestError, fmt.Errorf("%v; body: %q", resp.Status, body))
+		err := newError(
+			ErrRequestError,
+			fmt.Errorf("%v; body: %q", resp.Status, body),
+		)
 
 		if c.debug {
 			err = err.withRequest(request, reqReader)
@@ -178,7 +228,10 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 	err = json.NewDecoder(r).Decode(&out)
 
 	if c.debug {
-		_, _ = respReader.Seek(0, io.SeekStart) // Ignore seek errors for debug logging
+		_, _ = respReader.Seek(
+			0,
+			io.SeekStart,
+		) // Ignore seek errors for debug logging
 	}
 
 	if err != nil {
@@ -196,7 +249,8 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 	}
 
 	if len(out.Errors) > 0 {
-		if c.debug && (out.Errors[0].Extensions == nil || out.Errors[0].Extensions["request"] == nil) {
+		if c.debug &&
+			(out.Errors[0].Extensions == nil || out.Errors[0].Extensions["request"] == nil) {
 			out.Errors[0] = out.Errors[0].
 				withRequest(request, reqReader).
 				withResponse(resp, respReader)
@@ -210,7 +264,13 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 
 // do executes a single GraphQL operation.
 // return raw message and error
-func (c *Client) doRaw(ctx context.Context, op operationType, v any, variables any, options ...Option) ([]byte, error) {
+func (c *Client) doRaw(
+	ctx context.Context,
+	op operationType,
+	v any,
+	variables any,
+	options ...Option,
+) ([]byte, error) {
 	data, _, _, err := c.buildAndRequest(ctx, op, v, variables, options...)
 	if len(err) > 0 {
 		return data, err
@@ -219,21 +279,43 @@ func (c *Client) doRaw(ctx context.Context, op operationType, v any, variables a
 }
 
 // do executes a single GraphQL operation and unmarshal json.
-func (c *Client) do(ctx context.Context, op operationType, v any, variables any, options ...Option) error {
-	data, resp, respBuf, errs := c.buildAndRequest(ctx, op, v, variables, options...)
+func (c *Client) do(
+	ctx context.Context,
+	op operationType,
+	v any,
+	variables any,
+	options ...Option,
+) error {
+	data, resp, respBuf, errs := c.buildAndRequest(
+		ctx,
+		op,
+		v,
+		variables,
+		options...)
 	return c.processResponse(v, data, resp, respBuf, errs)
 }
 
 // Executes a pre-built query and unmarshals the response into v. Unlike the Query method you have to specify in the query the
 // fields that you want to receive as they are not inferred from v. This method is useful if you need to build the query dynamically.
-func (c *Client) Exec(ctx context.Context, query string, v any, variables map[string]any, options ...Option) error {
+func (c *Client) Exec(
+	ctx context.Context,
+	query string,
+	v any,
+	variables map[string]any,
+	options ...Option,
+) error {
 	data, resp, respBuf, errs := c.request(ctx, query, variables, options...)
 	return c.processResponse(v, data, resp, respBuf, errs)
 }
 
 // Executes a pre-built query and returns the raw json message. Unlike the Query method you have to specify in the query the
 // fields that you want to receive as they are not inferred from the interface. This method is useful if you need to build the query dynamically.
-func (c *Client) ExecRaw(ctx context.Context, query string, variables map[string]any, options ...Option) ([]byte, error) {
+func (c *Client) ExecRaw(
+	ctx context.Context,
+	query string,
+	variables map[string]any,
+	options ...Option,
+) ([]byte, error) {
 	data, _, _, errs := c.request(ctx, query, variables, options...)
 	if len(errs) > 0 {
 		return data, errs
@@ -241,7 +323,13 @@ func (c *Client) ExecRaw(ctx context.Context, query string, variables map[string
 	return data, nil
 }
 
-func (c *Client) processResponse(v any, data []byte, resp *http.Response, respBuf io.Reader, errs Errors) error {
+func (c *Client) processResponse(
+	v any,
+	data []byte,
+	resp *http.Response,
+	respBuf io.Reader,
+	errs Errors,
+) error {
 	if len(data) > 0 {
 		err := jsonutil.UnmarshalGraphQL(data, v)
 		if err != nil {

@@ -1,4 +1,4 @@
-.PHONY: help build test test-verbose test-coverage lint fmt vet clean examples
+.PHONY: help build test test-verbose test-coverage lint fmt format vet clean examples
 
 # Default target
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "  make test-coverage - Run tests with coverage report"
 	@echo "  make lint          - Run linters (golangci-lint)"
 	@echo "  make fmt           - Format code with gofmt"
+	@echo "  make format        - Format code with golines (80 char lines)"
 	@echo "  make vet           - Run go vet"
 	@echo "  make clean         - Clean build artifacts"
 	@echo "  make examples      - Build all examples"
@@ -49,10 +50,20 @@ lint:
 		$(MAKE) vet; \
 	fi
 
-# Format code
+# Format code with gofmt
 fmt:
 	@echo "Formatting code..."
 	gofmt -s -w .
+
+# Format code with golines (80 char lines, using goimports-reviser as base formatter)
+format:
+	@echo "Formatting code with golines..."
+	@if command -v golines >/dev/null 2>&1; then \
+		find . -name "*.go" -not -path "./vendor/*" -exec golines {} -w --base-formatter goimports-reviser --no-reformat-tags -m 80 -t 2 \;; \
+	else \
+		echo "golines not found. Install it with: go install github.com/segmentio/golines@latest"; \
+		exit 1; \
+	fi
 
 # Run go vet
 vet:

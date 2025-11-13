@@ -118,12 +118,15 @@ func ParseScreamingSnakeCase(name string) Name {
 // Name is an identifier name, broken up into individual words.
 type Name []string
 
-// ToMixedCaps expresses identifer name in MixedCaps naming convention.
+// ToMixedCaps expresses identifier name in MixedCaps naming convention.
 //
 // E.g., "ClientMutationID".
 func (n Name) ToMixedCaps() string {
 	for i, word := range n {
-		if strings.EqualFold(word, "IDs") { // Special case, plural form of ID initialism.
+		if strings.EqualFold(
+			word,
+			"IDs",
+		) { // Special case, plural form of ID initialism.
 			n[i] = "IDs"
 			continue
 		}
@@ -141,7 +144,7 @@ func (n Name) ToMixedCaps() string {
 	return strings.Join(n, "")
 }
 
-// ToLowerCamelCase expresses identifer name in lowerCamelCase naming convention.
+// ToLowerCamelCase expresses identifier name in lowerCamelCase naming convention.
 //
 // E.g., "clientMutationId".
 func (n Name) ToLowerCamelCase() string {

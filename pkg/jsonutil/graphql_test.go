@@ -472,7 +472,10 @@ func TestUnmarshalGraphQL_multipleValues(t *testing.T) {
 	type query struct {
 		Foo *string
 	}
-	err := jsonutil.UnmarshalGraphQL([]byte(`{"foo": "bar"}{"foo": "baz"}`), new(query))
+	err := jsonutil.UnmarshalGraphQL(
+		[]byte(`{"foo": "bar"}{"foo": "baz"}`),
+		new(query),
+	)
 	if err == nil {
 		t.Fatal("got error: nil, want: non-nil")
 	}
@@ -564,8 +567,14 @@ func TestUnmarshalGraphQL_orderedMapUnion(t *testing.T) {
 	*/
 	closedEventActor := [][2]any{{"login", ""}}
 	reopenedEventActor := [][2]any{{"login", ""}}
-	closedEvent := [][2]any{{"actor", closedEventActor}, {"createdAt", time.Time{}}}
-	reopenedEvent := [][2]any{{"actor", reopenedEventActor}, {"createdAt", time.Time{}}}
+	closedEvent := [][2]any{
+		{"actor", closedEventActor},
+		{"createdAt", time.Time{}},
+	}
+	reopenedEvent := [][2]any{
+		{"actor", reopenedEventActor},
+		{"createdAt", time.Time{}},
+	}
 	got := [][2]any{
 		{"__typename", ""},
 		{"... on ClosedEvent", closedEvent},
@@ -695,7 +704,7 @@ func TestUnmarshalGraphQL_unionWithConflictingFieldTypes(t *testing.T) {
 	*/
 
 	type starkexTransfer struct {
-		Nonce  int    `graphql:"nonce"`  // int type
+		Nonce  int    `graphql:"nonce"` // int type
 		Amount string `graphql:"amount"`
 	}
 
@@ -857,6 +866,10 @@ func TestUnmarshalGraphQL_interfaceFragment(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(gotNationalTeam, wantNationalTeam) {
-		t.Errorf("NationalTeam: not equal\ngot:  %+v\nwant: %+v", gotNationalTeam, wantNationalTeam)
+		t.Errorf(
+			"NationalTeam: not equal\ngot:  %+v\nwant: %+v",
+			gotNationalTeam,
+			wantNationalTeam,
+		)
 	}
 }

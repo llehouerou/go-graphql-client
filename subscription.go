@@ -140,44 +140,58 @@ func (sc *SubscriptionClient) GetTimeout() time.Duration {
 
 // WithWebSocket replaces customized websocket client constructor
 // In default, subscription client uses https://github.com/nhooyr/websocket
-func (sc *SubscriptionClient) WithWebSocket(fn func(sc *SubscriptionClient) (WebsocketConn, error)) *SubscriptionClient {
+func (sc *SubscriptionClient) WithWebSocket(
+	fn func(sc *SubscriptionClient) (WebsocketConn, error),
+) *SubscriptionClient {
 	sc.createConn = fn
 	return sc
 }
 
 // WithWebSocketOptions provides options to the websocket client
-func (sc *SubscriptionClient) WithWebSocketOptions(options WebsocketOptions) *SubscriptionClient {
+func (sc *SubscriptionClient) WithWebSocketOptions(
+	options WebsocketOptions,
+) *SubscriptionClient {
 	sc.websocketOptions = options
 	return sc
 }
 
 // WithConnectionParams updates connection params for sending to server through GQL_CONNECTION_INIT event
 // It's usually used for authentication handshake
-func (sc *SubscriptionClient) WithConnectionParams(params map[string]any) *SubscriptionClient {
+func (sc *SubscriptionClient) WithConnectionParams(
+	params map[string]any,
+) *SubscriptionClient {
 	sc.connectionParams = params
 	return sc
 }
 
 // WithTimeout updates write timeout of websocket client
-func (sc *SubscriptionClient) WithTimeout(timeout time.Duration) *SubscriptionClient {
+func (sc *SubscriptionClient) WithTimeout(
+	timeout time.Duration,
+) *SubscriptionClient {
 	sc.timeout = timeout
 	return sc
 }
 
 // WithRetryTimeout updates reconnecting timeout. When the websocket server was stopped, the client will retry connecting every second until timeout
-func (sc *SubscriptionClient) WithRetryTimeout(timeout time.Duration) *SubscriptionClient {
+func (sc *SubscriptionClient) WithRetryTimeout(
+	timeout time.Duration,
+) *SubscriptionClient {
 	sc.retryTimeout = timeout
 	return sc
 }
 
 // WithLog sets loging function to print out received messages. By default, nothing is printed
-func (sc *SubscriptionClient) WithLog(logger func(args ...any)) *SubscriptionClient {
+func (sc *SubscriptionClient) WithLog(
+	logger func(args ...any),
+) *SubscriptionClient {
 	sc.log = logger
 	return sc
 }
 
 // WithoutLogTypes these operation types won't be printed
-func (sc *SubscriptionClient) WithoutLogTypes(types ...OperationMessageType) *SubscriptionClient {
+func (sc *SubscriptionClient) WithoutLogTypes(
+	types ...OperationMessageType,
+) *SubscriptionClient {
 	sc.disabledLogTypes = types
 	return sc
 }
@@ -191,7 +205,9 @@ func (sc *SubscriptionClient) WithReadLimit(limit int64) *SubscriptionClient {
 // OnError event is triggered when there is any connection error. This is bottom exception handler level
 // If this function is empty, or returns nil, the error is ignored
 // If returns error, the websocket connection will be terminated
-func (sc *SubscriptionClient) OnError(onError func(sc *SubscriptionClient, err error) error) *SubscriptionClient {
+func (sc *SubscriptionClient) OnError(
+	onError func(sc *SubscriptionClient, err error) error,
+) *SubscriptionClient {
 	sc.onError = onError
 	return sc
 }
@@ -250,7 +266,11 @@ func (sc *SubscriptionClient) init() error {
 			}
 			return err
 		}
-		sc.printLog(fmt.Sprintf("%s. retry in second...", err.Error()), "client", GQL_INTERNAL)
+		sc.printLog(
+			fmt.Sprintf("%s. retry in second...", err.Error()),
+			"client",
+			GQL_INTERNAL,
+		)
 		time.Sleep(time.Second)
 	}
 }
@@ -262,7 +282,11 @@ func (sc *SubscriptionClient) writeJSON(v any) error {
 	return nil
 }
 
-func (sc *SubscriptionClient) printLog(message any, source string, opType OperationMessageType) {
+func (sc *SubscriptionClient) printLog(
+	message any,
+	source string,
+	opType OperationMessageType,
+) {
 	if sc.log == nil {
 		return
 	}
@@ -298,29 +322,53 @@ func (sc *SubscriptionClient) sendConnectionInit() (err error) {
 // Subscribe sends start message to server and open a channel to receive data.
 // The handler callback function will receive raw message data or error. If the call return error, onError event will be triggered
 // The function returns subscription ID and error. You can use subscription ID to unsubscribe the subscription
-func (sc *SubscriptionClient) Subscribe(v any, variables map[string]any, handler func(message []byte, err error) error, options ...Option) (string, error) {
+func (sc *SubscriptionClient) Subscribe(
+	v any,
+	variables map[string]any,
+	handler func(message []byte, err error) error,
+	options ...Option,
+) (string, error) {
 	return sc.do(v, variables, handler, options...)
 }
 
 // NamedSubscribe sends start message to server and open a channel to receive data, with operation name
 //
 // Deprecated: this is the shortcut of Subscribe method, with NewOperationName option
-func (sc *SubscriptionClient) NamedSubscribe(name string, v any, variables map[string]any, handler func(message []byte, err error) error, options ...Option) (string, error) {
+func (sc *SubscriptionClient) NamedSubscribe(
+	name string,
+	v any,
+	variables map[string]any,
+	handler func(message []byte, err error) error,
+	options ...Option,
+) (string, error) {
 	return sc.do(v, variables, handler, append(options, OperationName(name))...)
 }
 
 // SubscribeRaw sends start message to server and open a channel to receive data, with raw query
 // Deprecated: use Exec instead
-func (sc *SubscriptionClient) SubscribeRaw(query string, variables map[string]any, handler func(message []byte, err error) error) (string, error) {
+func (sc *SubscriptionClient) SubscribeRaw(
+	query string,
+	variables map[string]any,
+	handler func(message []byte, err error) error,
+) (string, error) {
 	return sc.doRaw(query, variables, handler)
 }
 
 // Exec sends start message to server and open a channel to receive data, with raw query
-func (sc *SubscriptionClient) Exec(query string, variables map[string]any, handler func(message []byte, err error) error) (string, error) {
+func (sc *SubscriptionClient) Exec(
+	query string,
+	variables map[string]any,
+	handler func(message []byte, err error) error,
+) (string, error) {
 	return sc.doRaw(query, variables, handler)
 }
 
-func (sc *SubscriptionClient) do(v any, variables map[string]any, handler func(message []byte, err error) error, options ...Option) (string, error) {
+func (sc *SubscriptionClient) do(
+	v any,
+	variables map[string]any,
+	handler func(message []byte, err error) error,
+	options ...Option,
+) (string, error) {
 	query, err := ConstructSubscription(v, variables, options...)
 	if err != nil {
 		return "", err
@@ -329,7 +377,11 @@ func (sc *SubscriptionClient) do(v any, variables map[string]any, handler func(m
 	return sc.doRaw(query, variables, handler)
 }
 
-func (sc *SubscriptionClient) doRaw(query string, variables map[string]any, handler func(message []byte, err error) error) (string, error) {
+func (sc *SubscriptionClient) doRaw(
+	query string,
+	variables map[string]any,
+	handler func(message []byte, err error) error,
+) (string, error) {
 	id := uuid.New().String()
 
 	sub := subscription{
@@ -353,13 +405,16 @@ func (sc *SubscriptionClient) doRaw(query string, variables map[string]any, hand
 }
 
 // Subscribe sends start message to server and open a channel to receive data
-func (sc *SubscriptionClient) startSubscription(id string, sub *subscription) error {
+func (sc *SubscriptionClient) startSubscription(
+	id string,
+	sub *subscription,
+) error {
 	if sub == nil || sub.started {
 		return nil
 	}
 
 	in := struct {
-		Query     string                 `json:"query"`
+		Query     string         `json:"query"`
 		Variables map[string]any `json:"variables,omitempty"`
 	}{
 		Query:     sub.query,
@@ -387,7 +442,9 @@ func (sc *SubscriptionClient) startSubscription(id string, sub *subscription) er
 	return nil
 }
 
-func (sc *SubscriptionClient) wrapHandler(fn handlerFunc) func(data []byte, err error) {
+func (sc *SubscriptionClient) wrapHandler(
+	fn handlerFunc,
+) func(data []byte, err error) {
 	return func(data []byte, err error) {
 		if errValue := fn(data, err); errValue != nil {
 			sc.errorChan <- errValue
@@ -431,13 +488,19 @@ func (sc *SubscriptionClient) Run() error {
 							return
 						}
 					}
-					closeStatus := websocket.CloseStatus(err) //nolint:staticcheck // Library still functional
+					closeStatus := websocket.CloseStatus( //nolint:staticcheck // Library still functional
+						err,
+					)
 					if closeStatus == websocket.StatusNormalClosure {
 						// close event from websocket client, exiting...
 						return
 					}
 					if closeStatus != -1 {
-						sc.printLog(fmt.Sprintf("%s. Retry connecting...", err), "client", GQL_INTERNAL)
+						sc.printLog(
+							fmt.Sprintf("%s. Retry connecting...", err),
+							"client",
+							GQL_INTERNAL,
+						)
 						if err = sc.Reset(); err != nil {
 							sc.errorChan <- err
 							return
@@ -663,7 +726,10 @@ func (wh *WebsocketHandler) ReadJSON(v any) error {
 }
 
 func (wh *WebsocketHandler) Close() error {
-	return wh.Conn.Close(websocket.StatusNormalClosure, "close websocket") //nolint:staticcheck // Library still functional
+	return wh.Conn.Close( //nolint:staticcheck // Library still functional
+		websocket.StatusNormalClosure,
+		"close websocket",
+	)
 }
 
 func newWebsocketConn(sc *SubscriptionClient) (WebsocketConn, error) {
@@ -673,7 +739,11 @@ func newWebsocketConn(sc *SubscriptionClient) (WebsocketConn, error) {
 		HTTPClient:   sc.websocketOptions.HTTPClient,
 	}
 
-	c, _, err := websocket.Dial(sc.GetContext(), sc.GetURL(), options) //nolint:staticcheck // Library still functional
+	c, _, err := websocket.Dial( //nolint:staticcheck // Library still functional
+		sc.GetContext(),
+		sc.GetURL(),
+		options,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -68,7 +68,10 @@ type localRoundTripper struct { //nolint:unused // Used for local testing
 	handler http.Handler
 }
 
-func (l localRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) { //nolint:unused // Used for local testing
+//nolint:unused // Used for local testing
+func (l localRoundTripper) RoundTrip(
+	req *http.Request,
+) (*http.Response, error) {
 	w := httptest.NewRecorder()
 	l.handler.ServeHTTP(w, req)
 	return w.Result(), nil

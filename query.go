@@ -10,9 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/llehouerou/go-graphql-client/types"
-
 	"github.com/llehouerou/go-graphql-client/ident"
+	"github.com/llehouerou/go-graphql-client/types"
 )
 
 type constructOptionsOutput struct {
@@ -36,7 +35,10 @@ func constructOptions(options []Option) (*constructOptionsOutput, error) {
 		case optionTypeOperationName:
 			output.operationName = option.String()
 		case OptionTypeOperationDirective:
-			output.operationDirectives = append(output.operationDirectives, option.String())
+			output.operationDirectives = append(
+				output.operationDirectives,
+				option.String(),
+			)
 		default:
 			return nil, fmt.Errorf("invalid query option type: %s", option.Type())
 		}
@@ -59,20 +61,37 @@ func ConstructQuery(v any, variables any, options ...Option) (string, error) {
 
 	if variables != nil {
 		reflectVal := reflect.ValueOf(variables)
-		if reflectVal.Kind() != reflect.Map || (reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
-			return fmt.Sprintf("query %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+		if reflectVal.Kind() != reflect.Map ||
+			(reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
+			return fmt.Sprintf(
+				"query %s(%s)%s%s",
+				optionsOutput.operationName,
+				queryArguments(variables),
+				optionsOutput.OperationDirectivesString(),
+				query,
+			), nil
 		}
 	}
 
-	if optionsOutput.operationName == "" && len(optionsOutput.operationDirectives) == 0 {
+	if optionsOutput.operationName == "" &&
+		len(optionsOutput.operationDirectives) == 0 {
 		return query, nil
 	}
 
-	return fmt.Sprintf("query %s%s%s", optionsOutput.operationName, optionsOutput.OperationDirectivesString(), query), nil
+	return fmt.Sprintf(
+		"query %s%s%s",
+		optionsOutput.operationName,
+		optionsOutput.OperationDirectivesString(),
+		query,
+	), nil
 }
 
 // ConstructQuery build GraphQL mutation string from struct and variables
-func ConstructMutation(v any, variables any, options ...Option) (string, error) {
+func ConstructMutation(
+	v any,
+	variables any,
+	options ...Option,
+) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -83,20 +102,37 @@ func ConstructMutation(v any, variables any, options ...Option) (string, error) 
 	}
 	if variables != nil {
 		reflectVal := reflect.ValueOf(variables)
-		if reflectVal.Kind() != reflect.Map || (reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
-			return fmt.Sprintf("mutation %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+		if reflectVal.Kind() != reflect.Map ||
+			(reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
+			return fmt.Sprintf(
+				"mutation %s(%s)%s%s",
+				optionsOutput.operationName,
+				queryArguments(variables),
+				optionsOutput.OperationDirectivesString(),
+				query,
+			), nil
 		}
 	}
 
-	if optionsOutput.operationName == "" && len(optionsOutput.operationDirectives) == 0 {
+	if optionsOutput.operationName == "" &&
+		len(optionsOutput.operationDirectives) == 0 {
 		return "mutation" + query, nil
 	}
 
-	return fmt.Sprintf("mutation %s%s%s", optionsOutput.operationName, optionsOutput.OperationDirectivesString(), query), nil
+	return fmt.Sprintf(
+		"mutation %s%s%s",
+		optionsOutput.operationName,
+		optionsOutput.OperationDirectivesString(),
+		query,
+	), nil
 }
 
 // ConstructSubscription build GraphQL subscription string from struct and variables
-func ConstructSubscription(v any, variables any, options ...Option) (string, error) {
+func ConstructSubscription(
+	v any,
+	variables any,
+	options ...Option,
+) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -107,14 +143,27 @@ func ConstructSubscription(v any, variables any, options ...Option) (string, err
 	}
 	if variables != nil {
 		reflectVal := reflect.ValueOf(variables)
-		if reflectVal.Kind() != reflect.Map || (reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
-			return fmt.Sprintf("subscription %s(%s)%s%s", optionsOutput.operationName, queryArguments(variables), optionsOutput.OperationDirectivesString(), query), nil
+		if reflectVal.Kind() != reflect.Map ||
+			(reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
+			return fmt.Sprintf(
+				"subscription %s(%s)%s%s",
+				optionsOutput.operationName,
+				queryArguments(variables),
+				optionsOutput.OperationDirectivesString(),
+				query,
+			), nil
 		}
 	}
-	if optionsOutput.operationName == "" && len(optionsOutput.operationDirectives) == 0 {
+	if optionsOutput.operationName == "" &&
+		len(optionsOutput.operationDirectives) == 0 {
 		return "subscription" + query, nil
 	}
-	return fmt.Sprintf("subscription %s%s%s", optionsOutput.operationName, optionsOutput.OperationDirectivesString(), query), nil
+	return fmt.Sprintf(
+		"subscription %s%s%s",
+		optionsOutput.operationName,
+		optionsOutput.OperationDirectivesString(),
+		query,
+	), nil
 }
 
 // queryArguments constructs a minified arguments string for variables.
@@ -252,7 +301,12 @@ func query(v any) (string, error) {
 
 // writeQuery writes a minified query for t to w.
 // If inline is true, the struct fields of t are inlined into parent struct.
-func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error {
+func writeQuery(
+	w io.Writer,
+	t reflect.Type,
+	v reflect.Value,
+	inline bool,
+) error {
 
 	switch t.Kind() {
 	case reflect.Interface:
@@ -275,9 +329,18 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			method := v.MethodByName("GetGraphQLWrapped")
 			if method.IsValid() {
 				wrapped := method.Call(nil)[0]
-				err := writeQuery(w, reflect.TypeOf(wrapped.Interface()), reflect.ValueOf(wrapped.Interface()), inline)
+				err := writeQuery(
+					w,
+					reflect.TypeOf(wrapped.Interface()),
+					reflect.ValueOf(wrapped.Interface()),
+					inline,
+				)
 				if err != nil {
-					return fmt.Errorf("failed to write query for wrapped struct `%v`: %w", t, err)
+					return fmt.Errorf(
+						"failed to write query for wrapped struct `%v`: %w",
+						t,
+						err,
+					)
 				}
 				return nil
 			}
@@ -350,7 +413,11 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 
 			err := writeQuery(w, f.Type, FieldSafe(v, i), inlineField)
 			if err != nil {
-				return fmt.Errorf("failed to write query for struct field `%v`: %w", f.Name, err)
+				return fmt.Errorf(
+					"failed to write query for struct field `%v`: %w",
+					f.Name,
+					err,
+				)
 			}
 		}
 		if !inline {
@@ -360,7 +427,11 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 		if t.Elem().Kind() != reflect.Array {
 			err := writeQuery(w, t.Elem(), IndexSafe(v, 0), false)
 			if err != nil {
-				return fmt.Errorf("failed to write query for slice item `%v`: %w", t, err)
+				return fmt.Errorf(
+					"failed to write query for slice item `%v`: %w",
+					t,
+					err,
+				)
 			}
 			return nil
 		}
@@ -383,7 +454,11 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			_, _ = io.WriteString(w, keyString)
 			err := writeQuery(w, val.Type(), val, false)
 			if err != nil {
-				return fmt.Errorf("failed to write query for pair[1] `%v`: %w", val.Type(), err)
+				return fmt.Errorf(
+					"failed to write query for pair[1] `%v`: %w",
+					val.Type(),
+					err,
+				)
 			}
 		}
 		_, _ = io.WriteString(w, "}")
