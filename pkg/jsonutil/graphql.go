@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/llehouerou/go-graphql-client/internal/reflectutil"
+	"github.com/llehouerou/go-graphql-client/types"
 )
 
 
@@ -113,7 +114,7 @@ func (s stack) Pop() stack {
 func (d *decoder) shouldIncludeFragment(
 	field reflect.StructField,
 ) bool {
-	tag, ok := field.Tag.Lookup("graphql")
+	tag, ok := field.Tag.Lookup(types.GraphQLTag)
 	if !ok {
 		return true
 	}
@@ -398,7 +399,7 @@ func (d *decoder) decodeArrayValue() error {
 // (string, number, bool, nil, json.RawMessage).
 func (d *decoder) decodeScalarValue(tok any) error {
 	// Capture __typename value to filter inline fragments
-	if d.currentKey == "__typename" {
+	if d.currentKey == types.TypenameField {
 		if typename, ok := tok.(string); ok {
 			d.currentTypename = typename
 		}
@@ -446,7 +447,7 @@ func (d *decoder) decodeObjectStart() {
 				if isGraphQLFragment(field) {
 					// Add GraphQL fragment and track its typename
 					d.vs = append(d.vs, []reflect.Value{v.Field(i)})
-					tag, _ := field.Tag.Lookup("graphql")
+					tag, _ := field.Tag.Lookup(types.GraphQLTag)
 					d.fragmentTypes = append(
 						d.fragmentTypes,
 						extractFragmentTypename(tag),
@@ -634,7 +635,7 @@ func orderedMapValueByGraphQLName(v reflect.Value, name string) reflect.Value {
 }
 
 func hasScalarTag(f reflect.StructField) bool {
-	return isTrue(f.Tag.Get("scalar"))
+	return isTrue(f.Tag.Get(types.ScalarTag))
 }
 
 func isTrue(s string) bool {
@@ -654,7 +655,7 @@ func hasGraphQLName(f reflect.StructField, v reflect.Value, name string) bool {
 		}
 	}
 	if !ok {
-		value, ok = f.Tag.Lookup("graphql")
+		value, ok = f.Tag.Lookup(types.GraphQLTag)
 	}
 	if !ok {
 		// TODO: caseconv package is relatively slow. Optimize it, then consider using it here.
@@ -666,7 +667,7 @@ func hasGraphQLName(f reflect.StructField, v reflect.Value, name string) bool {
 
 func keyHasGraphQLName(value, name string) bool {
 	value = strings.TrimSpace(value) // TODO: Parse better.
-	if strings.HasPrefix(value, "...") {
+	if strings.HasPrefix(value, types.FragmentPrefix) {
 		// GraphQL fragment. It doesn't have a name.
 		return false
 	}
@@ -681,7 +682,7 @@ func keyHasGraphQLName(value, name string) bool {
 
 // isGraphQLFragment reports whether struct field f is a GraphQL fragment.
 func isGraphQLFragment(f reflect.StructField) bool {
-	value, ok := f.Tag.Lookup("graphql")
+	value, ok := f.Tag.Lookup(types.GraphQLTag)
 	if !ok {
 		return false
 	}
@@ -691,7 +692,7 @@ func isGraphQLFragment(f reflect.StructField) bool {
 // isGraphQLFragment reports whether ordered map kv pair f is a GraphQL fragment.
 func keyForGraphQLFragment(value string) bool {
 	value = strings.TrimSpace(value) // TODO: Parse better.
-	return strings.HasPrefix(value, "...")
+	return strings.HasPrefix(value, types.FragmentPrefix)
 }
 
 // extractFragmentTypename extracts the typename from a GraphQL fragment tag.
@@ -699,17 +700,17 @@ func keyForGraphQLFragment(value string) bool {
 // Returns empty string if not a valid fragment tag.
 func extractFragmentTypename(tag string) string {
 	tag = strings.TrimSpace(tag)
-	if !strings.HasPrefix(tag, "...") {
+	if !strings.HasPrefix(tag, types.FragmentPrefix) {
 		return ""
 	}
 	// Remove "..." prefix
-	tag = strings.TrimSpace(tag[3:])
+	tag = strings.TrimSpace(tag[len(types.FragmentPrefix):])
 	// Check for "on " prefix
 	if !strings.HasPrefix(tag, "on ") {
 		return ""
 	}
 	// Extract typename after "on "
-	typename := strings.TrimSpace(tag[3:])
+	typename := strings.TrimSpace(tag[len("on "):])
 	return typename
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/llehouerou/go-graphql-client/ident"
 	"github.com/llehouerou/go-graphql-client/internal/reflectutil"
+	"github.com/llehouerou/go-graphql-client/types"
 )
 
 type constructOptionsOutput struct {
@@ -369,7 +370,7 @@ func writeStructQuery(
 		}
 
 		if !ok {
-			value, ok = f.Tag.Lookup("graphql")
+			value, ok = f.Tag.Lookup(types.GraphQLTag)
 		}
 		// Skip this field if the tag value is hyphen
 		if value == "-" {
@@ -389,7 +390,7 @@ func writeStructQuery(
 			}
 		}
 		// Skip writeQuery if the GraphQL type associated with the filed is scalar
-		if isTrue(f.Tag.Get("scalar")) {
+		if isTrue(f.Tag.Get(types.ScalarTag)) {
 			continue
 		}
 
