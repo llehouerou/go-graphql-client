@@ -295,6 +295,200 @@ func query(v any) (string, error) {
 	return buf.String(), nil
 }
 
+// writeStructQuery writes a minified query for a struct type to w.
+// If inline is true, the struct fields are inlined into parent struct.
+func writeStructQuery(
+	w io.Writer,
+	t reflect.Type,
+	v reflect.Value,
+	inline bool,
+) error {
+	if v.IsValid() && reflectutil.IsWrapperType(v) {
+		wrapped := reflectutil.UnwrapValue(v)
+		if wrapped.IsValid() {
+			err := writeQuery(
+				w,
+				wrapped.Type(),
+				wrapped,
+				inline,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"failed to write query for wrapped struct `%v`: %w",
+					t,
+					err,
+				)
+			}
+			return nil
+		}
+	}
+
+	// If the type implements json.Unmarshaler, it's a scalar. Don't expand it.
+	if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
+		return nil
+	}
+	if t.AssignableTo(idType) {
+		return nil
+	}
+	if !inline {
+		_, _ = io.WriteString(w, "{")
+	}
+	iter := 0
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		value := ""
+		ok := false
+
+		// Check if the field type implements GraphQLType
+		if reflectutil.ImplementsGraphQLType(f.Type) {
+			fieldVal := v.Field(i)
+			// Only skip nil pointers and nil interfaces (not nil slices/maps)
+			kind := fieldVal.Kind()
+			if !fieldVal.IsValid() ||
+				((kind == reflect.Ptr || kind == reflect.Interface) &&
+					fieldVal.IsNil()) {
+				// Skip this field if it's a nil pointer or nil interface
+				continue
+			}
+			typeName, typeok := reflectutil.GetGraphQLType(fieldVal, f.Type)
+			if typeok {
+				value = typeName
+				ok = true
+			} else {
+				// Skip this field if the concrete value is a nil pointer
+				continue
+			}
+		} else if f.Type.Kind() == reflect.Slice &&
+			reflectutil.ImplementsGraphQLType(f.Type.Elem()) {
+			// For slices, check if the element type implements GraphQLType
+			typeName, typeok := reflectutil.GetGraphQLTypeFromType(f.Type.Elem())
+			if typeok {
+				value = typeName
+				ok = true
+			}
+		}
+
+		if !ok {
+			value, ok = f.Tag.Lookup("graphql")
+		}
+		// Skip this field if the tag value is hyphen
+		if value == "-" {
+			continue
+		}
+		if iter != 0 {
+			_, _ = io.WriteString(w, ",")
+		}
+		iter++
+
+		inlineField := f.Anonymous && !ok
+		if !inlineField {
+			if ok {
+				_, _ = io.WriteString(w, value)
+			} else {
+				_, _ = io.WriteString(w, ident.ParseMixedCaps(f.Name).ToLowerCamelCase())
+			}
+		}
+		// Skip writeQuery if the GraphQL type associated with the filed is scalar
+		if isTrue(f.Tag.Get("scalar")) {
+			continue
+		}
+
+		err := writeQuery(w, f.Type, reflectutil.FieldSafe(v, i), inlineField)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to write query for struct field `%v`: %w",
+				f.Name,
+				err,
+			)
+		}
+	}
+	if !inline {
+		_, _ = io.WriteString(w, "}")
+	}
+	return nil
+}
+
+// writeSliceQuery writes a minified query for a slice type to w.
+func writeSliceQuery(
+	w io.Writer,
+	t reflect.Type,
+	v reflect.Value,
+) error {
+	if t.Elem().Kind() != reflect.Array {
+		err := writeQuery(w, t.Elem(), reflectutil.IndexSafe(v, 0), false)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to write query for slice item `%v`: %w",
+				t,
+				err,
+			)
+		}
+		return nil
+	}
+	// handle [][2]any like an ordered map
+	return writeOrderedMapQuery(w, t, v)
+}
+
+// writeOrderedMapQuery writes a minified query for [][2]any pattern to w.
+func writeOrderedMapQuery(
+	w io.Writer,
+	t reflect.Type,
+	v reflect.Value,
+) error {
+	if t.Elem().Len() != 2 {
+		return fmt.Errorf("only arrays of len 2 are supported, got %v", t.Elem())
+	}
+	sliceOfPairs := v
+	_, _ = io.WriteString(w, "{")
+	for i := 0; i < sliceOfPairs.Len(); i++ {
+		pair := sliceOfPairs.Index(i)
+		// it.Value() returns any, so we need to use reflect.ValueOf
+		// to cast it away
+		key, val := pair.Index(0), reflect.ValueOf(pair.Index(1).Interface())
+		keyString, ok := key.Interface().(string)
+		if !ok {
+			return fmt.Errorf("expected pair (string, %v), got (%v, %v)",
+				val.Type(), key.Type(), val.Type())
+		}
+		_, _ = io.WriteString(w, keyString)
+		err := writeQuery(w, val.Type(), val, false)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to write query for pair[1] `%v`: %w",
+				val.Type(),
+				err,
+			)
+		}
+	}
+	_, _ = io.WriteString(w, "}")
+	return nil
+}
+
+// writeInterfaceQuery writes a minified query for an interface type to w.
+func writeInterfaceQuery(
+	w io.Writer,
+	t reflect.Type,
+	v reflect.Value,
+	inline bool,
+) error {
+	val := reflect.ValueOf(v.Interface())
+	if !val.IsValid() {
+		return nil
+	}
+	// Check if the interface contains a nil pointer
+	kind := val.Kind()
+	if (kind == reflect.Ptr || kind == reflect.Interface || kind == reflect.Slice ||
+		kind == reflect.Map || kind == reflect.Chan || kind == reflect.Func) &&
+		val.IsNil() {
+		return nil
+	}
+	err := writeQuery(w, val.Type(), val, inline)
+	if err != nil {
+		return fmt.Errorf("failed to write query for interface `%v`: %w", t, err)
+	}
+	return nil
+}
+
 // writeQuery writes a minified query for t to w.
 // If inline is true, the struct fields of t are inlined into parent struct.
 func writeQuery(
@@ -306,169 +500,16 @@ func writeQuery(
 
 	switch t.Kind() {
 	case reflect.Interface:
-		val := reflect.ValueOf(v.Interface())
-		if !val.IsValid() {
-			return nil
-		}
-		// Check if the interface contains a nil pointer
-		kind := val.Kind()
-		if (kind == reflect.Ptr || kind == reflect.Interface || kind == reflect.Slice ||
-			kind == reflect.Map || kind == reflect.Chan || kind == reflect.Func) &&
-			val.IsNil() {
-			return nil
-		}
-		err := writeQuery(w, val.Type(), val, inline)
-		if err != nil {
-			return fmt.Errorf("failed to write query for interface `%v`: %w", t, err)
-		}
+		return writeInterfaceQuery(w, t, v, inline)
 	case reflect.Ptr:
 		err := writeQuery(w, t.Elem(), reflectutil.ElemSafe(v), false)
 		if err != nil {
 			return fmt.Errorf("failed to write query for ptr `%v`: %w", t, err)
 		}
 	case reflect.Struct:
-
-		if v.IsValid() && reflectutil.IsWrapperType(v) {
-			wrapped := reflectutil.UnwrapValue(v)
-			if wrapped.IsValid() {
-				err := writeQuery(
-					w,
-					wrapped.Type(),
-					wrapped,
-					inline,
-				)
-				if err != nil {
-					return fmt.Errorf(
-						"failed to write query for wrapped struct `%v`: %w",
-						t,
-						err,
-					)
-				}
-				return nil
-			}
-		}
-
-		// If the type implements json.Unmarshaler, it's a scalar. Don't expand it.
-		if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
-			return nil
-		}
-		if t.AssignableTo(idType) {
-			return nil
-		}
-		if !inline {
-			_, _ = io.WriteString(w, "{")
-		}
-		iter := 0
-		for i := 0; i < t.NumField(); i++ {
-			f := t.Field(i)
-			value := ""
-			ok := false
-
-			// Check if the field type implements GraphQLType
-			if reflectutil.ImplementsGraphQLType(f.Type) {
-				fieldVal := v.Field(i)
-				// Only skip nil pointers and nil interfaces (not nil slices/maps)
-				kind := fieldVal.Kind()
-				if !fieldVal.IsValid() ||
-					((kind == reflect.Ptr || kind == reflect.Interface) &&
-						fieldVal.IsNil()) {
-					// Skip this field if it's a nil pointer or nil interface
-					continue
-				}
-				typeName, typeok := reflectutil.GetGraphQLType(fieldVal, f.Type)
-				if typeok {
-					value = typeName
-					ok = true
-				} else {
-					// Skip this field if the concrete value is a nil pointer
-					continue
-				}
-			} else if f.Type.Kind() == reflect.Slice &&
-				reflectutil.ImplementsGraphQLType(f.Type.Elem()) {
-				// For slices, check if the element type implements GraphQLType
-				typeName, typeok := reflectutil.GetGraphQLTypeFromType(f.Type.Elem())
-				if typeok {
-					value = typeName
-					ok = true
-				}
-			}
-
-			if !ok {
-				value, ok = f.Tag.Lookup("graphql")
-			}
-			// Skip this field if the tag value is hyphen
-			if value == "-" {
-				continue
-			}
-			if iter != 0 {
-				_, _ = io.WriteString(w, ",")
-			}
-			iter++
-
-			inlineField := f.Anonymous && !ok
-			if !inlineField {
-				if ok {
-					_, _ = io.WriteString(w, value)
-				} else {
-					_, _ = io.WriteString(w, ident.ParseMixedCaps(f.Name).ToLowerCamelCase())
-				}
-			}
-			// Skip writeQuery if the GraphQL type associated with the filed is scalar
-			if isTrue(f.Tag.Get("scalar")) {
-				continue
-			}
-
-			err := writeQuery(w, f.Type, reflectutil.FieldSafe(v, i), inlineField)
-			if err != nil {
-				return fmt.Errorf(
-					"failed to write query for struct field `%v`: %w",
-					f.Name,
-					err,
-				)
-			}
-		}
-		if !inline {
-			_, _ = io.WriteString(w, "}")
-		}
+		return writeStructQuery(w, t, v, inline)
 	case reflect.Slice:
-		if t.Elem().Kind() != reflect.Array {
-			err := writeQuery(w, t.Elem(), reflectutil.IndexSafe(v, 0), false)
-			if err != nil {
-				return fmt.Errorf(
-					"failed to write query for slice item `%v`: %w",
-					t,
-					err,
-				)
-			}
-			return nil
-		}
-		// handle [][2]any like an ordered map
-		if t.Elem().Len() != 2 {
-			return fmt.Errorf("only arrays of len 2 are supported, got %v", t.Elem())
-		}
-		sliceOfPairs := v
-		_, _ = io.WriteString(w, "{")
-		for i := 0; i < sliceOfPairs.Len(); i++ {
-			pair := sliceOfPairs.Index(i)
-			// it.Value() returns any, so we need to use reflect.ValueOf
-			// to cast it away
-			key, val := pair.Index(0), reflect.ValueOf(pair.Index(1).Interface())
-			keyString, ok := key.Interface().(string)
-			if !ok {
-				return fmt.Errorf("expected pair (string, %v), got (%v, %v)",
-					val.Type(), key.Type(), val.Type())
-			}
-			_, _ = io.WriteString(w, keyString)
-			err := writeQuery(w, val.Type(), val, false)
-			if err != nil {
-				return fmt.Errorf(
-					"failed to write query for pair[1] `%v`: %w",
-					val.Type(),
-					err,
-				)
-			}
-		}
-		_, _ = io.WriteString(w, "}")
+		return writeSliceQuery(w, t, v)
 	case reflect.Map:
 		return fmt.Errorf("type %v is not supported, use [][2]any instead", t)
 	}
