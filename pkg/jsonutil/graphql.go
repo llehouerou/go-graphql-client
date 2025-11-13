@@ -12,16 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/llehouerou/go-graphql-client/types"
+	"github.com/llehouerou/go-graphql-client/internal/reflectutil"
 )
 
-const (
-	// wrapperMethodName is the name of the method that unwraps container types
-	wrapperMethodName = "GetGraphQLWrapped"
-
-	// wrapperFieldName is the required name of the field holding wrapped data
-	wrapperFieldName = "Value"
-)
 
 // UnmarshalGraphQL parses the JSON-encoded GraphQL response data and stores
 // the result in the GraphQL query data structure pointed to by v.
@@ -47,7 +40,7 @@ const (
 // Example:
 //
 //	type Wrapper[T any] struct {
-//	    Value T  // REQUIRED: Must be named "Value"
+//	    Value T  // REQUIRED: Must be named reflectutil.WrapperFieldName ("Value")
 //	}
 //	func (w Wrapper[T]) GetGraphQLWrapped() T { return w.Value }
 func UnmarshalGraphQL(data []byte, v any) error {
@@ -210,21 +203,12 @@ func (d *decoder) decode() error {
 				case reflect.Struct:
 					f, scalar = fieldByGraphQLName(v, key)
 					if f.IsValid() {
-						fwrapper := f
-						for fwrapper.Kind() == reflect.Ptr || fwrapper.Kind() == reflect.Interface {
-							fwrapper = fwrapper.Elem()
-						}
-						if fwrapper.IsValid() {
-							method := fwrapper.MethodByName(wrapperMethodName)
-							if method.IsValid() {
-								// Wrapper type detected. Per convention, the wrapped data
-								// must be in a field named "Value". Unmarshal directly into
-								// the Value field, bypassing the wrapper.
-								wrapped := fwrapper.FieldByName(wrapperFieldName)
-								if wrapped.IsValid() {
-									f = wrapped
-								}
-							}
+						// Check if this is a wrapper type and unwrap if needed
+						unwrapped := reflectutil.UnwrapValueField(f)
+						if unwrapped.IsValid() {
+							// Wrapper type detected. Unmarshal directly into
+							// the unwrapped Value field, bypassing the wrapper.
+							f = unwrapped
 						}
 						// Check for special embedded json
 						if f.Type() == rawMessageValue.Type() {
@@ -316,14 +300,10 @@ func (d *decoder) decode() error {
 				}
 				// Check if this is a wrapper type (has GetGraphQLWrapped method).
 				// If so, unwrap to get the actual slice field per "Value" convention.
-				fwrapper := v
-				if fwrapper.IsValid() {
-					method := fwrapper.MethodByName(wrapperMethodName)
-					if method.IsValid() {
-						wrapped := fwrapper.FieldByName(wrapperFieldName)
-						if wrapped.IsValid() {
-							v = wrapped
-						}
+				if v.IsValid() {
+					unwrapped := reflectutil.UnwrapValueField(v)
+					if unwrapped.IsValid() {
+						v = unwrapped
 					}
 				}
 
@@ -610,10 +590,10 @@ func isTrue(s string) bool {
 func hasGraphQLName(f reflect.StructField, v reflect.Value, name string) bool {
 	value := ""
 	ok := false
-	if f.Type.Implements(types.GraphqlTypeInterface) {
-		graphqlType, typeok := v.Interface().(types.GraphQLType)
+	if reflectutil.ImplementsGraphQLType(f.Type) {
+		typeName, typeok := reflectutil.GetGraphQLType(v, f.Type)
 		if typeok {
-			value = graphqlType.GetGraphQLType()
+			value = typeName
 			ok = true
 		}
 	}

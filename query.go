@@ -12,7 +12,6 @@ import (
 
 	"github.com/llehouerou/go-graphql-client/ident"
 	"github.com/llehouerou/go-graphql-client/internal/reflectutil"
-	"github.com/llehouerou/go-graphql-client/types"
 )
 
 type constructOptionsOutput struct {
@@ -225,19 +224,23 @@ func queryArguments(variables any) string {
 // If value is true, then "!" is written at the end of t.
 func writeArgumentType(w io.Writer, t reflect.Type, v any, value bool) {
 
-	if t.Implements(types.GraphqlTypeInterface) {
-		var graphqlType types.GraphQLType
-		var ok bool
+	if reflectutil.ImplementsGraphQLType(t) {
 		value = t.Kind() != reflect.Ptr
+		var typeName string
+		var ok bool
+
+		// Try to use the actual value first if provided
 		if v != nil {
-			graphqlType, ok = v.(types.GraphQLType)
-		} else if t.Kind() == reflect.Ptr {
-			graphqlType, ok = reflect.New(t.Elem()).Interface().(types.GraphQLType)
-		} else {
-			graphqlType, ok = reflect.Zero(t).Interface().(types.GraphQLType)
+			typeName, ok = reflectutil.GetGraphQLType(reflect.ValueOf(v), t)
 		}
+
+		// Fall back to type-based extraction if no value or extraction failed
+		if !ok {
+			typeName, ok = reflectutil.GetGraphQLTypeFromType(t)
+		}
+
 		if ok {
-			_, _ = io.WriteString(w, graphqlType.GetGraphQLType())
+			_, _ = io.WriteString(w, typeName)
 			if value {
 				// Value is a required type, so add "!" to the end.
 				_, _ = io.WriteString(w, "!")
@@ -325,14 +328,13 @@ func writeQuery(
 		}
 	case reflect.Struct:
 
-		if v.IsValid() {
-			method := v.MethodByName(wrapperMethodName)
-			if method.IsValid() {
-				wrapped := method.Call(nil)[0]
+		if v.IsValid() && reflectutil.IsWrapperType(v) {
+			wrapped := reflectutil.UnwrapValue(v)
+			if wrapped.IsValid() {
 				err := writeQuery(
 					w,
-					reflect.TypeOf(wrapped.Interface()),
-					reflect.ValueOf(wrapped.Interface()),
+					wrapped.Type(),
+					wrapped,
 					inline,
 				)
 				if err != nil {
@@ -363,39 +365,30 @@ func writeQuery(
 			ok := false
 
 			// Check if the field type implements GraphQLType
-			if f.Type.Implements(types.GraphqlTypeInterface) {
+			if reflectutil.ImplementsGraphQLType(f.Type) {
 				fieldVal := v.Field(i)
 				// Only skip nil pointers and nil interfaces (not nil slices/maps)
 				kind := fieldVal.Kind()
-				if !fieldVal.IsValid() || ((kind == reflect.Ptr || kind == reflect.Interface) && fieldVal.IsNil()) {
+				if !fieldVal.IsValid() ||
+					((kind == reflect.Ptr || kind == reflect.Interface) &&
+						fieldVal.IsNil()) {
 					// Skip this field if it's a nil pointer or nil interface
 					continue
 				}
-				graphqlType, typeok := fieldVal.Interface().(types.GraphQLType)
+				typeName, typeok := reflectutil.GetGraphQLType(fieldVal, f.Type)
 				if typeok {
-					// Use reflection to check if the value inside the interface is nil pointer
-					graphqlTypeVal := reflect.ValueOf(graphqlType)
-					if graphqlTypeVal.IsValid() && (graphqlTypeVal.Kind() != reflect.Ptr || !graphqlTypeVal.IsNil()) {
-						value = graphqlType.GetGraphQLType()
-						ok = true
-					} else {
-						// Skip this field if the concrete value is a nil pointer
-						continue
-					}
-				}
-			} else if f.Type.Kind() == reflect.Slice && f.Type.Elem().Implements(types.GraphqlTypeInterface) {
-				// For slices, check if the element type implements GraphQLType
-				elemType := f.Type.Elem()
-				// Create a zero value of the element type to call GetGraphQLType()
-				var graphqlType types.GraphQLType
-				var typeok bool
-				if elemType.Kind() == reflect.Ptr {
-					graphqlType, typeok = reflect.New(elemType.Elem()).Interface().(types.GraphQLType)
+					value = typeName
+					ok = true
 				} else {
-					graphqlType, typeok = reflect.Zero(elemType).Interface().(types.GraphQLType)
+					// Skip this field if the concrete value is a nil pointer
+					continue
 				}
+			} else if f.Type.Kind() == reflect.Slice &&
+				reflectutil.ImplementsGraphQLType(f.Type.Elem()) {
+				// For slices, check if the element type implements GraphQLType
+				typeName, typeok := reflectutil.GetGraphQLTypeFromType(f.Type.Elem())
 				if typeok {
-					value = graphqlType.GetGraphQLType()
+					value = typeName
 					ok = true
 				}
 			}
@@ -482,10 +475,6 @@ func writeQuery(
 	return nil
 }
 
-const (
-	// wrapperMethodName is the method name for wrapper type unwrapping
-	wrapperMethodName = "GetGraphQLWrapped"
-)
 
 var jsonUnmarshaler = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 var idType = reflect.TypeOf(ID(""))
