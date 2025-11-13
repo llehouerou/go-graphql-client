@@ -886,8 +886,8 @@ func TestQueryArguments_StructVariables(t *testing.T) {
 			name: "struct with unexported fields (should skip)",
 			in: struct {
 				Name       string `json:"name"`
-				age        int    `json:"age"`         // unexported
-				privateVal bool   `json:"privateVal"`  // unexported
+				age        int    // unexported, no tag needed
+				privateVal bool   // unexported, no tag needed
 				Active     bool   `json:"active"`
 			}{
 				Name:       "John",
@@ -999,9 +999,9 @@ func TestQueryArguments_StructVariables(t *testing.T) {
 		{
 			name: "struct with all unexported fields (should return empty string)",
 			in: struct {
-				name   string `json:"name"`
-				age    int    `json:"age"`
-				active bool   `json:"active"`
+				name   string // unexported, no tag needed
+				age    int    // unexported, no tag needed
+				active bool   // unexported, no tag needed
 			}{
 				name:   "John",
 				age:    30,
