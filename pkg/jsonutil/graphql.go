@@ -175,269 +175,37 @@ func (d *decoder) decode() error {
 				return errors.New("unexpected non-key in JSON input")
 			}
 
-			// Track current key for typename capture
-			d.currentKey = key
-
-			someFieldExist := false
-			// If one field is raw all must be treated as raw
-			rawMessage := false
-			isScalar := false
-
-			// First pass: find all fields and check if any matching fragment has it
-			type fieldInfo struct {
-				field         reflect.Value
-				isScalar      bool
-				fragmentMatch bool
-			}
-			fields := make([]fieldInfo, len(d.vs))
-			hasMatchingFragmentWithField := false
-
-			for i := range d.vs {
-				v := d.vs[i].Top()
-				for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-					v = v.Elem()
-				}
-				var f reflect.Value
-				var scalar bool
-				switch v.Kind() {
-				case reflect.Struct:
-					f, scalar = fieldByGraphQLName(v, key)
-					if f.IsValid() {
-						// Check if this is a wrapper type and unwrap if needed
-						unwrapped := reflectutil.UnwrapValueField(f)
-						if unwrapped.IsValid() {
-							// Wrapper type detected. Unmarshal directly into
-							// the unwrapped Value field, bypassing the wrapper.
-							f = unwrapped
-						}
-						// Check for special embedded json
-						if f.Type() == rawMessageValue.Type() {
-							rawMessage = true
-						}
-					}
-				case reflect.Slice:
-					f = orderedMapValueByGraphQLName(v, key)
-					// For ordered maps, we need to be careful about unwrapping
-					// Unwrap pointers, but keep interfaces as they are
-					// (unmarshalValue can handle interface types)
-					for f.Kind() == reflect.Ptr {
-						f = f.Elem()
-					}
-				}
-
-				fragmentMatch := true
-				if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" &&
-					d.currentTypename != "" {
-					fragmentMatch = d.fragmentTypes[i] == d.currentTypename
-				}
-
-				fields[i] = fieldInfo{
-					field:         f,
-					isScalar:      scalar,
-					fragmentMatch: fragmentMatch,
-				}
-
-				if f.IsValid() && fragmentMatch {
-					hasMatchingFragmentWithField = true
-				}
-			}
-
-			// Second pass: decide which fields to use
-			for i := range d.vs {
-				f := fields[i].field
-
-				if f.IsValid() {
-					someFieldExist = true
-					if fields[i].isScalar {
-						isScalar = true
-					}
-				}
-
-				// Skip this field if:
-				// 1. It's from a non-matching fragment AND
-				// 2. A matching fragment also has this field
-				if f.IsValid() && !fields[i].fragmentMatch &&
-					hasMatchingFragmentWithField {
-					f = reflect.Value{}
-				}
-
-				d.vs[i] = append(d.vs[i], f)
-			}
-			if !someFieldExist {
-				return fmt.Errorf(
-					"struct field for %q doesn't exist in any of %v places to unmarshal",
-					key,
-					len(d.vs),
-				)
-			}
-
-			if rawMessage || isScalar {
-				// Read the next complete object from the json stream
-				var data json.RawMessage
-				err = d.tokenizer.Decode(&data)
-				if err != nil {
-					return err
-				}
-				tok = data
-			} else {
-				// We've just consumed the current token, which was the key.
-				// Read the next token, which should be the value, and let the rest of code process it.
-				tok, err = d.tokenizer.Token()
-				if err == io.EOF {
-					return errors.New("unexpected end of JSON input")
-				} else if err != nil {
-					return err
-				}
+			tok, err = d.decodeObjectKey(key, rawMessageValue)
+			if err != nil {
+				return err
 			}
 
 		// Are we inside an array and seeing next value (rather than end of array)?
 		case d.state() == '[' && tok != json.Delim(']'):
-			someSliceExist := false
-			for i := range d.vs {
-				v := d.vs[i].Top()
-				for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-					v = v.Elem()
-				}
-				// Check if this is a wrapper type (has GetGraphQLWrapped method).
-				// If so, unwrap to get the actual slice field per "Value" convention.
-				if v.IsValid() {
-					unwrapped := reflectutil.UnwrapValueField(v)
-					if unwrapped.IsValid() {
-						v = unwrapped
-					}
-				}
-
-				var f reflect.Value
-				if v.Kind() == reflect.Slice {
-					// we want to append the template item copy
-					// so that all the inner structure gets preserved
-					copied, err := copyTemplate(v.Index(0))
-					if err != nil {
-						return fmt.Errorf("failed to copy template: %w", err)
-					}
-					v.Set(reflect.Append(v, copied)) // v = append(v, T).
-					f = v.Index(v.Len() - 1)
-					someSliceExist = true
-				}
-				d.vs[i] = append(d.vs[i], f)
-			}
-			if !someSliceExist {
-				return fmt.Errorf(
-					"slice doesn't exist in any of %v places to unmarshal",
-					len(d.vs),
-				)
+			err = d.decodeArrayValue()
+			if err != nil {
+				return err
 			}
 		}
 
 		switch tok := tok.(type) {
 		case string, json.Number, bool, nil, json.RawMessage:
 			// Value.
-
-			// Capture __typename value to filter inline fragments
-			if d.currentKey == "__typename" {
-				if typename, ok := tok.(string); ok {
-					d.currentTypename = typename
-				}
+			err := d.decodeScalarValue(tok)
+			if err != nil {
+				return err
 			}
-
-			for i := range d.vs {
-				v := d.vs[i].Top()
-				if !v.IsValid() {
-					continue
-				}
-				err := unmarshalValue(tok, v)
-				if err != nil {
-					return err
-				}
-			}
-			d.popAllVs()
 
 		case json.Delim:
 			switch tok {
 			case '{':
 				// Start of object.
-
-				d.pushState(tok)
-
-				frontier := make([]reflect.Value, len(d.vs)) // Places to look for GraphQL fragments/embedded structs.
-				for i := range d.vs {
-					v := d.vs[i].Top()
-					frontier[i] = v
-					// TODO: Do this recursively or not? Add a test case if needed.
-					if v.Kind() == reflect.Ptr && v.IsNil() {
-						v.Set(reflect.New(v.Type().Elem())) // v = new(T).
-					}
-				}
-				// Find GraphQL fragments/embedded structs recursively, adding to frontier
-				// as new ones are discovered and exploring them further.
-				for len(frontier) > 0 {
-					v := frontier[0]
-					frontier = frontier[1:]
-					for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-						v = v.Elem()
-					}
-					if v.Kind() == reflect.Struct {
-						for i := 0; i < v.NumField(); i++ {
-							field := v.Type().Field(i)
-							if isGraphQLFragment(field) {
-								// Add GraphQL fragment and track its typename
-								d.vs = append(d.vs, []reflect.Value{v.Field(i)})
-								tag, _ := field.Tag.Lookup("graphql")
-								d.fragmentTypes = append(d.fragmentTypes, extractFragmentTypename(tag))
-								frontier = append(frontier, v.Field(i))
-							} else if field.Anonymous {
-								// Add embedded struct (not a fragment)
-								d.vs = append(d.vs, []reflect.Value{v.Field(i)})
-								d.fragmentTypes = append(d.fragmentTypes, "")
-								frontier = append(frontier, v.Field(i))
-							}
-						}
-					} else if isOrderedMap(v) {
-						for i := 0; i < v.Len(); i++ {
-							pair := v.Index(i)
-							key, val := pair.Index(0), pair.Index(1)
-							keyStr := key.Interface().(string)
-							if keyForGraphQLFragment(keyStr) {
-								// Add GraphQL fragment and track its typename
-								d.vs = append(d.vs, []reflect.Value{val})
-								d.fragmentTypes = append(d.fragmentTypes, extractFragmentTypename(keyStr))
-								frontier = append(frontier, val)
-							}
-						}
-					}
-				}
+				d.decodeObjectStart()
 			case '[':
 				// Start of array.
-
-				d.pushState(tok)
-
-				for i := range d.vs {
-					v := d.vs[i].Top()
-					// TODO: Confirm this is needed, write a test case.
-					//if v.Kind() == reflect.Ptr && v.IsNil() {
-					//	v.Set(reflect.New(v.Type().Elem())) // v = new(T).
-					//}
-
-					// Reset slice to empty (in case it had non-zero initial value).
-					for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-						v = v.Elem()
-					}
-					if v.Kind() != reflect.Slice {
-						continue
-					}
-					newSlice := reflect.MakeSlice(v.Type(), 0, 0) // v = make(T, 0, 0).
-					switch v.Len() {
-					case 0:
-						// if there is no template we need to create one so that we can
-						// handle both cases (with or without a template) in the same way
-						newSlice = reflect.Append(newSlice, reflect.Zero(v.Type().Elem()))
-					case 1:
-						// if there is a template, we need to keep it at index 0
-						newSlice = reflect.Append(newSlice, v.Index(0))
-					case 2:
-						return fmt.Errorf("template slice can only have 1 item, got %d", v.Len())
-					}
-					v.Set(newSlice)
+				err := d.decodeArrayStart()
+				if err != nil {
+					return err
 				}
 			case '}':
 				// End of object.
@@ -454,6 +222,294 @@ func (d *decoder) decode() error {
 		default:
 			return errors.New("unexpected token in JSON input")
 		}
+	}
+	return nil
+}
+
+// decodeObjectKey handles the processing of an object key and its value.
+// This is called when we're inside an object and see the next key.
+func (d *decoder) decodeObjectKey(
+	key string,
+	rawMessageValue reflect.Value,
+) (any, error) {
+	// Track current key for typename capture
+	d.currentKey = key
+
+	someFieldExist := false
+	// If one field is raw all must be treated as raw
+	rawMessage := false
+	isScalar := false
+
+	// First pass: find all fields and check if any matching fragment has it
+	type fieldInfo struct {
+		field         reflect.Value
+		isScalar      bool
+		fragmentMatch bool
+	}
+	fields := make([]fieldInfo, len(d.vs))
+	hasMatchingFragmentWithField := false
+
+	for i := range d.vs {
+		v := d.vs[i].Top()
+		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+			v = v.Elem()
+		}
+		var f reflect.Value
+		var scalar bool
+		switch v.Kind() {
+		case reflect.Struct:
+			f, scalar = fieldByGraphQLName(v, key)
+			if f.IsValid() {
+				// Check if this is a wrapper type and unwrap if needed
+				unwrapped := reflectutil.UnwrapValueField(f)
+				if unwrapped.IsValid() {
+					// Wrapper type detected. Unmarshal directly into
+					// the unwrapped Value field, bypassing the wrapper.
+					f = unwrapped
+				}
+				// Check for special embedded json
+				if f.Type() == rawMessageValue.Type() {
+					rawMessage = true
+				}
+			}
+		case reflect.Slice:
+			f = orderedMapValueByGraphQLName(v, key)
+			// For ordered maps, we need to be careful about unwrapping
+			// Unwrap pointers, but keep interfaces as they are
+			// (unmarshalValue can handle interface types)
+			for f.Kind() == reflect.Ptr {
+				f = f.Elem()
+			}
+		}
+
+		fragmentMatch := true
+		if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" &&
+			d.currentTypename != "" {
+			fragmentMatch = d.fragmentTypes[i] == d.currentTypename
+		}
+
+		fields[i] = fieldInfo{
+			field:         f,
+			isScalar:      scalar,
+			fragmentMatch: fragmentMatch,
+		}
+
+		if f.IsValid() && fragmentMatch {
+			hasMatchingFragmentWithField = true
+		}
+	}
+
+	// Second pass: decide which fields to use
+	for i := range d.vs {
+		f := fields[i].field
+
+		if f.IsValid() {
+			someFieldExist = true
+			if fields[i].isScalar {
+				isScalar = true
+			}
+		}
+
+		// Skip this field if:
+		// 1. It's from a non-matching fragment AND
+		// 2. A matching fragment also has this field
+		if f.IsValid() && !fields[i].fragmentMatch &&
+			hasMatchingFragmentWithField {
+			f = reflect.Value{}
+		}
+
+		d.vs[i] = append(d.vs[i], f)
+	}
+	if !someFieldExist {
+		return nil, fmt.Errorf(
+			"struct field for %q doesn't exist in any of %v places to unmarshal",
+			key,
+			len(d.vs),
+		)
+	}
+
+	var tok any
+	var err error
+	if rawMessage || isScalar {
+		// Read the next complete object from the json stream
+		var data json.RawMessage
+		err = d.tokenizer.Decode(&data)
+		if err != nil {
+			return nil, err
+		}
+		tok = data
+	} else {
+		// We've just consumed the current token, which was the key.
+		// Read the next token, which should be the value,
+		// and let the rest of code process it.
+		tok, err = d.tokenizer.Token()
+		if err == io.EOF {
+			return nil, errors.New("unexpected end of JSON input")
+		} else if err != nil {
+			return nil, err
+		}
+	}
+
+	return tok, nil
+}
+
+// decodeArrayValue handles processing an array value by appending a new element
+// to slices in the decoder's value stack.
+func (d *decoder) decodeArrayValue() error {
+	someSliceExist := false
+	for i := range d.vs {
+		v := d.vs[i].Top()
+		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+			v = v.Elem()
+		}
+		// Check if this is a wrapper type (has GetGraphQLWrapped method).
+		// If so, unwrap to get the actual slice field per "Value" convention.
+		if v.IsValid() {
+			unwrapped := reflectutil.UnwrapValueField(v)
+			if unwrapped.IsValid() {
+				v = unwrapped
+			}
+		}
+
+		var f reflect.Value
+		if v.Kind() == reflect.Slice {
+			// we want to append the template item copy
+			// so that all the inner structure gets preserved
+			copied, err := copyTemplate(v.Index(0))
+			if err != nil {
+				return fmt.Errorf("failed to copy template: %w", err)
+			}
+			v.Set(reflect.Append(v, copied)) // v = append(v, T).
+			f = v.Index(v.Len() - 1)
+			someSliceExist = true
+		}
+		d.vs[i] = append(d.vs[i], f)
+	}
+	if !someSliceExist {
+		return fmt.Errorf(
+			"slice doesn't exist in any of %v places to unmarshal",
+			len(d.vs),
+		)
+	}
+	return nil
+}
+
+// decodeScalarValue handles decoding of scalar values
+// (string, number, bool, nil, json.RawMessage).
+func (d *decoder) decodeScalarValue(tok any) error {
+	// Capture __typename value to filter inline fragments
+	if d.currentKey == "__typename" {
+		if typename, ok := tok.(string); ok {
+			d.currentTypename = typename
+		}
+	}
+
+	for i := range d.vs {
+		v := d.vs[i].Top()
+		if !v.IsValid() {
+			continue
+		}
+		err := unmarshalValue(tok, v)
+		if err != nil {
+			return err
+		}
+	}
+	d.popAllVs()
+	return nil
+}
+
+// decodeObjectStart handles the start of a JSON object ('{' token).
+// It initializes values and discovers GraphQL fragments and embedded structs.
+func (d *decoder) decodeObjectStart() {
+	d.pushState('{')
+
+	frontier := make([]reflect.Value, len(d.vs))
+	for i := range d.vs {
+		v := d.vs[i].Top()
+		frontier[i] = v
+		// TODO: Do this recursively or not? Add a test case if needed.
+		if v.Kind() == reflect.Ptr && v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem())) // v = new(T).
+		}
+	}
+	// Find GraphQL fragments/embedded structs recursively, adding to frontier
+	// as new ones are discovered and exploring them further.
+	for len(frontier) > 0 {
+		v := frontier[0]
+		frontier = frontier[1:]
+		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+			v = v.Elem()
+		}
+		if v.Kind() == reflect.Struct {
+			for i := 0; i < v.NumField(); i++ {
+				field := v.Type().Field(i)
+				if isGraphQLFragment(field) {
+					// Add GraphQL fragment and track its typename
+					d.vs = append(d.vs, []reflect.Value{v.Field(i)})
+					tag, _ := field.Tag.Lookup("graphql")
+					d.fragmentTypes = append(
+						d.fragmentTypes,
+						extractFragmentTypename(tag),
+					)
+					frontier = append(frontier, v.Field(i))
+				} else if field.Anonymous {
+					// Add embedded struct (not a fragment)
+					d.vs = append(d.vs, []reflect.Value{v.Field(i)})
+					d.fragmentTypes = append(d.fragmentTypes, "")
+					frontier = append(frontier, v.Field(i))
+				}
+			}
+		} else if isOrderedMap(v) {
+			for i := 0; i < v.Len(); i++ {
+				pair := v.Index(i)
+				key, val := pair.Index(0), pair.Index(1)
+				keyStr := key.Interface().(string)
+				if keyForGraphQLFragment(keyStr) {
+					// Add GraphQL fragment and track its typename
+					d.vs = append(d.vs, []reflect.Value{val})
+					d.fragmentTypes = append(
+						d.fragmentTypes,
+						extractFragmentTypename(keyStr),
+					)
+					frontier = append(frontier, val)
+				}
+			}
+		}
+	}
+}
+
+// decodeArrayStart handles the start of a JSON array ('[' token).
+// It initializes slices and ensures they have a template element.
+func (d *decoder) decodeArrayStart() error {
+	d.pushState('[')
+
+	for i := range d.vs {
+		v := d.vs[i].Top()
+		// TODO: Confirm this is needed, write a test case.
+		//if v.Kind() == reflect.Ptr && v.IsNil() {
+		//	v.Set(reflect.New(v.Type().Elem())) // v = new(T).
+		//}
+
+		// Reset slice to empty (in case it had non-zero initial value).
+		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+			v = v.Elem()
+		}
+		if v.Kind() != reflect.Slice {
+			continue
+		}
+		newSlice := reflect.MakeSlice(v.Type(), 0, 0) // v = make(T, 0, 0).
+		switch v.Len() {
+		case 0:
+			// if there is no template we need to create one so that we can
+			// handle both cases (with or without a template) in the same way
+			newSlice = reflect.Append(newSlice, reflect.Zero(v.Type().Elem()))
+		case 1:
+			// if there is a template, we need to keep it at index 0
+			newSlice = reflect.Append(newSlice, v.Index(0))
+		case 2:
+			return fmt.Errorf("template slice can only have 1 item, got %d", v.Len())
+		}
+		v.Set(newSlice)
 	}
 	return nil
 }
