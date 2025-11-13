@@ -131,9 +131,9 @@ func queryArguments(variables any) string {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			io.WriteString(&buf, "$")
-			io.WriteString(&buf, k)
-			io.WriteString(&buf, ":")
+			_, _ = io.WriteString(&buf, "$")
+			_, _ = io.WriteString(&buf, k)
+			_, _ = io.WriteString(&buf, ":")
 			writeArgumentType(&buf, reflect.TypeOf(v[k]), v[k], true)
 		}
 	default:
@@ -168,9 +168,9 @@ func queryArguments(variables any) string {
 				return field.Tag.Get("json") == jsonName
 			})
 			value := val.FieldByName(field.Name)
-			io.WriteString(&buf, "$")
-			io.WriteString(&buf, jsonName)
-			io.WriteString(&buf, ":")
+			_, _ = io.WriteString(&buf, "$")
+			_, _ = io.WriteString(&buf, jsonName)
+			_, _ = io.WriteString(&buf, ":")
 			writeArgumentType(&buf, field.Type, value.Interface(), true)
 		}
 	}
@@ -195,10 +195,10 @@ func writeArgumentType(w io.Writer, t reflect.Type, v any, value bool) {
 			graphqlType, ok = reflect.Zero(t).Interface().(types.GraphQLType)
 		}
 		if ok {
-			io.WriteString(w, graphqlType.GetGraphQLType())
+			_, _ = io.WriteString(w, graphqlType.GetGraphQLType())
 			if value {
 				// Value is a required type, so add "!" to the end.
-				io.WriteString(w, "!")
+				_, _ = io.WriteString(w, "!")
 			}
 			return
 		}
@@ -213,27 +213,27 @@ func writeArgumentType(w io.Writer, t reflect.Type, v any, value bool) {
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
 		// List. E.g., "[Int]".
-		io.WriteString(w, "[")
+		_, _ = io.WriteString(w, "[")
 		writeArgumentType(w, t.Elem(), nil, true)
-		io.WriteString(w, "]")
+		_, _ = io.WriteString(w, "]")
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		io.WriteString(w, "Int")
+		_, _ = io.WriteString(w, "Int")
 	case reflect.Float32, reflect.Float64:
-		io.WriteString(w, "Float")
+		_, _ = io.WriteString(w, "Float")
 	case reflect.Bool:
-		io.WriteString(w, "Boolean")
+		_, _ = io.WriteString(w, "Boolean")
 	default:
 		n := t.Name()
 		if n == "string" {
 			n = "String"
 		}
-		io.WriteString(w, n)
+		_, _ = io.WriteString(w, n)
 	}
 
 	if value {
 		// Value is a required type, so add "!" to the end.
-		io.WriteString(w, "!")
+		_, _ = io.WriteString(w, "!")
 	}
 }
 
@@ -284,14 +284,14 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 		}
 
 		// If the type implements json.Unmarshaler, it's a scalar. Don't expand it.
-		if reflect.PtrTo(t).Implements(jsonUnmarshaler) {
+		if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
 			return nil
 		}
 		if t.AssignableTo(idType) {
 			return nil
 		}
 		if !inline {
-			io.WriteString(w, "{")
+			_, _ = io.WriteString(w, "{")
 		}
 		iter := 0
 		for i := 0; i < t.NumField(); i++ {
@@ -331,16 +331,16 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 				continue
 			}
 			if iter != 0 {
-				io.WriteString(w, ",")
+				_, _ = io.WriteString(w, ",")
 			}
 			iter++
 
 			inlineField := f.Anonymous && !ok
 			if !inlineField {
 				if ok {
-					io.WriteString(w, value)
+					_, _ = io.WriteString(w, value)
 				} else {
-					io.WriteString(w, ident.ParseMixedCaps(f.Name).ToLowerCamelCase())
+					_, _ = io.WriteString(w, ident.ParseMixedCaps(f.Name).ToLowerCamelCase())
 				}
 			}
 			// Skip writeQuery if the GraphQL type associated with the filed is scalar
@@ -354,7 +354,7 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			}
 		}
 		if !inline {
-			io.WriteString(w, "}")
+			_, _ = io.WriteString(w, "}")
 		}
 	case reflect.Slice:
 		if t.Elem().Kind() != reflect.Array {

@@ -126,7 +126,7 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 	resp, err := c.httpClient.Do(request)
 
 	if c.debug {
-		reqReader.Seek(0, io.SeekStart)
+		_, _ = reqReader.Seek(0, io.SeekStart) // Ignore seek errors for debug logging
 	}
 
 	if err != nil {
@@ -136,7 +136,7 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 		}
 		return nil, nil, nil, Errors{e}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	r := resp.Body
 
@@ -145,7 +145,7 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 		if err != nil {
 			return nil, nil, nil, Errors{newError(ErrJsonDecode, fmt.Errorf("problem trying to create gzip reader: %w", err))}
 		}
-		defer gr.Close()
+		defer func() { _ = gr.Close() }()
 		r = gr
 	}
 
@@ -178,7 +178,7 @@ func (c *Client) request(ctx context.Context, query string, variables any, optio
 	err = json.NewDecoder(r).Decode(&out)
 
 	if c.debug {
-		respReader.Seek(0, io.SeekStart)
+		_, _ = respReader.Seek(0, io.SeekStart) // Ignore seek errors for debug logging
 	}
 
 	if err != nil {

@@ -85,7 +85,7 @@ func (s stack) Pop() stack {
 // based on the current typename. Returns true if:
 // - No typename is set (backward compatibility: include all fragments)
 // - The fragment's typename matches the current typename
-func (d *decoder) shouldIncludeFragment(field reflect.StructField) bool {
+func (d *decoder) shouldIncludeFragment(field reflect.StructField) bool { //nolint:unused // Reserved for future use
 	tag, ok := field.Tag.Lookup("graphql")
 	if !ok {
 		return true
@@ -94,7 +94,7 @@ func (d *decoder) shouldIncludeFragment(field reflect.StructField) bool {
 }
 
 // shouldIncludeFragmentByTag determines if a fragment with the given tag should be included.
-func (d *decoder) shouldIncludeFragmentByTag(tag string) bool {
+func (d *decoder) shouldIncludeFragmentByTag(tag string) bool { //nolint:unused // Reserved for future use
 	// If no typename is set, include all fragments (backward compatibility)
 	if d.currentTypename == "" {
 		return true

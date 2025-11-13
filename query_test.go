@@ -837,13 +837,13 @@ func TestGraphQLTypeInterface_StructFields(t *testing.T) {
 	_ = customFieldImpl // Use it to avoid unused variable error in type assertion below
 
 	// Define the GetGraphQLType method on the type
-	type CustomFieldType interface {
+	type CustomFieldType interface { //nolint:unused // Test type definition
 		GetGraphQLType() string
 	}
 
 	// Test 1: Field with GraphQL arguments via GetGraphQLType()
 	t.Run("FieldWithArguments", func(t *testing.T) {
-		type CustomFieldWithArgs struct {
+		type CustomFieldWithArgs struct { //nolint:unused // Test type definition
 			Value string
 		}
 
@@ -871,7 +871,7 @@ func TestGraphQLTypeInterface_StructFields(t *testing.T) {
 	// Test 2: Field implementing GraphQLType with custom representation
 	t.Run("CustomTypeField", func(t *testing.T) {
 		// CustomTimestamp that returns a GraphQL field with specific format
-		type CustomTimestamp struct {
+		type CustomTimestamp struct { //nolint:unused // Test type definition
 			time.Time
 		}
 

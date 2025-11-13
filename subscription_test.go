@@ -181,7 +181,7 @@ func TestSubscriptionLifeCycle(t *testing.T) {
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer server.Shutdown(ctx)
+	defer func() { _ = server.Shutdown(ctx) }()
 	defer cancel()
 
 	subscriptionClient.
@@ -230,12 +230,12 @@ func TestSubscriptionLifeCycle(t *testing.T) {
 
 	go func() {
 		if err := subscriptionClient.Run(); err == nil || err.Error() != "exit" {
-			(*t).Fatalf("got error: %v, want: exit", err)
+			t.Errorf("got error: %v, want: exit", err)
 		}
 		stop <- true
 	}()
 
-	defer subscriptionClient.Close()
+	defer func() { _ = subscriptionClient.Close() }()
 
 	// wait until the subscription client connects to the server
 	time.Sleep(2 * time.Second)
@@ -277,7 +277,7 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer server.Shutdown(ctx)
+	defer func() { _ = server.Shutdown(ctx) }()
 	defer cancel()
 
 	subscriptionClient.
@@ -397,14 +397,15 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 		}
 		err = client.Mutate(context.Background(), &q, variables, OperationName("SayHello"))
 		if err != nil {
-			(*t).Fatalf("got error: %v, want: nil", err)
+			t.Errorf("got error: %v, want: nil", err)
+			return
 		}
 
 		time.Sleep(time.Second)
-		subscriptionClient.Unsubscribe(subId1)
+		_ = subscriptionClient.Unsubscribe(subId1)
 	}()
 
-	defer subscriptionClient.Close()
+	defer func() { _ = subscriptionClient.Close() }()
 
 	if err := subscriptionClient.Run(); err != nil {
 		t.Fatalf("got error: %v, want: nil", err)

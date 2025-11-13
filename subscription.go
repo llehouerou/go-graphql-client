@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"nhooyr.io/websocket"
+	"nhooyr.io/websocket" //nolint:staticcheck // Library still functional, migration pending
 	"nhooyr.io/websocket/wsjson"
 )
 
@@ -398,14 +398,14 @@ func (sc *SubscriptionClient) wrapHandler(fn handlerFunc) func(data []byte, err 
 // Run start websocket client and subscriptions. If this function is run with goroutine, it can be stopped after closed
 func (sc *SubscriptionClient) Run() error {
 	if err := sc.init(); err != nil {
-		return fmt.Errorf("retry timeout. exiting...")
+		return fmt.Errorf("retry timeout, exiting")
 	}
 
 	// lazily start subscriptions
 	sc.subscribersMu.Lock()
 	for k, v := range sc.subscriptions {
 		if err := sc.startSubscription(k, v); err != nil {
-			sc.Unsubscribe(k)
+			_ = sc.Unsubscribe(k)
 			return err
 		}
 	}
@@ -431,7 +431,7 @@ func (sc *SubscriptionClient) Run() error {
 							return
 						}
 					}
-					closeStatus := websocket.CloseStatus(err)
+					closeStatus := websocket.CloseStatus(err) //nolint:staticcheck // Library still functional
 					if closeStatus == websocket.StatusNormalClosure {
 						// close event from websocket client, exiting...
 						return
@@ -495,7 +495,7 @@ func (sc *SubscriptionClient) Run() error {
 					sc.printLog(message, "server", GQL_CONNECTION_ERROR)
 				case GQL_COMPLETE:
 					sc.printLog(message, "server", GQL_COMPLETE)
-					sc.Unsubscribe(message.ID)
+					_ = sc.Unsubscribe(message.ID)
 				case GQL_CONNECTION_KEEP_ALIVE:
 					sc.printLog(message, "server", GQL_CONNECTION_KEEP_ALIVE)
 				case GQL_CONNECTION_ACK:
@@ -625,9 +625,13 @@ func (sc *SubscriptionClient) Close() (err error) {
 		}
 	}
 
-	_ = sc.terminate()
+	if terminateErr := sc.terminate(); terminateErr != nil {
+		err = terminateErr
+	}
 	if sc.conn != nil {
-		err = sc.conn.Close()
+		if closeErr := sc.conn.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
 		sc.conn = nil
 		if sc.onDisconnected != nil {
 			sc.onDisconnected()
@@ -659,17 +663,17 @@ func (wh *WebsocketHandler) ReadJSON(v any) error {
 }
 
 func (wh *WebsocketHandler) Close() error {
-	return wh.Conn.Close(websocket.StatusNormalClosure, "close websocket")
+	return wh.Conn.Close(websocket.StatusNormalClosure, "close websocket") //nolint:staticcheck // Library still functional
 }
 
 func newWebsocketConn(sc *SubscriptionClient) (WebsocketConn, error) {
 
-	options := &websocket.DialOptions{
+	options := &websocket.DialOptions{ //nolint:staticcheck // Library still functional
 		Subprotocols: []string{"graphql-ws"},
 		HTTPClient:   sc.websocketOptions.HTTPClient,
 	}
 
-	c, _, err := websocket.Dial(sc.GetContext(), sc.GetURL(), options)
+	c, _, err := websocket.Dial(sc.GetContext(), sc.GetURL(), options) //nolint:staticcheck // Library still functional
 	if err != nil {
 		return nil, err
 	}

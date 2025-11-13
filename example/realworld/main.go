@@ -64,11 +64,11 @@ func print(v interface{}) {
 
 // localRoundTripper is an http.RoundTripper that executes HTTP transactions
 // by using handler directly, instead of going over an HTTP connection.
-type localRoundTripper struct {
+type localRoundTripper struct { //nolint:unused // Used for local testing
 	handler http.Handler
 }
 
-func (l localRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (l localRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) { //nolint:unused // Used for local testing
 	w := httptest.NewRecorder()
 	l.handler.ServeHTTP(w, req)
 	return w.Result(), nil

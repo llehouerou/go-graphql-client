@@ -8,5 +8,5 @@ package main
 func main() {
 	go startServer()
 	go startSendHello()
-	startSubscription()
+	_ = startSubscription()
 }
