@@ -136,7 +136,8 @@ func (c *Client) request(
 		return nil, nil, nil, Errors{newError(ErrGraphQLEncode, err)}
 	}
 
-	reqReader := bytes.NewReader(buf.Bytes())
+	reqBody := buf.Bytes()
+	reqReader := bytes.NewReader(reqBody)
 	request, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -144,13 +145,14 @@ func (c *Client) request(
 		reqReader,
 	)
 	if err != nil {
-		e := newError(
+		e := c.NewRequestError(
 			ErrRequestError,
 			fmt.Errorf("problem constructing request: %w", err),
+			request,
+			nil,
+			bytes.NewReader(reqBody),
+			nil,
 		)
-		if c.debug {
-			e = e.withRequest(request, reqReader)
-		}
 		return nil, nil, nil, Errors{e}
 	}
 	request.Header.Add("Content-Type", "application/json")
@@ -169,10 +171,14 @@ func (c *Client) request(
 	}
 
 	if err != nil {
-		e := newError(ErrRequestError, err)
-		if c.debug {
-			e = e.withRequest(request, reqReader)
-		}
+		e := c.NewRequestError(
+			ErrRequestError,
+			err,
+			request,
+			nil,
+			bytes.NewReader(reqBody),
+			nil,
+		)
 		return nil, nil, nil, Errors{e}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -195,14 +201,14 @@ func (c *Client) request(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		err := newError(
+		err := c.NewRequestError(
 			ErrRequestError,
 			fmt.Errorf("%v; body: %q", resp.Status, body),
+			request,
+			nil,
+			bytes.NewReader(reqBody),
+			nil,
 		)
-
-		if c.debug {
-			err = err.withRequest(request, reqReader)
-		}
 		return nil, nil, nil, Errors{err}
 	}
 
@@ -212,13 +218,14 @@ func (c *Client) request(
 	}
 
 	// copy the response reader for debugging
+	var respBody []byte
 	var respReader *bytes.Reader
 	if c.debug {
-		body, err := io.ReadAll(resp.Body)
+		respBody, err = io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, nil, nil, Errors{newError(ErrJsonDecode, err)}
 		}
-		respReader = bytes.NewReader(body)
+		respReader = bytes.NewReader(respBody)
 		r = io.NopCloser(respReader)
 	}
 
@@ -232,11 +239,14 @@ func (c *Client) request(
 	}
 
 	if err != nil {
-		we := newError(ErrJsonDecode, err)
-		if c.debug {
-			we = we.withRequest(request, reqReader).
-				withResponse(resp, respReader)
-		}
+		we := c.NewRequestError(
+			ErrJsonDecode,
+			err,
+			request,
+			resp,
+			bytes.NewReader(reqBody),
+			bytes.NewReader(respBody),
+		)
 		return nil, nil, nil, Errors{we}
 	}
 
@@ -248,9 +258,13 @@ func (c *Client) request(
 	if len(out.Errors) > 0 {
 		if c.debug &&
 			(out.Errors[0].Extensions == nil || out.Errors[0].Extensions["request"] == nil) {
-			out.Errors[0] = out.Errors[0].
-				withRequest(request, reqReader).
-				withResponse(resp, respReader)
+			out.Errors[0] = c.DecorateError(
+				out.Errors[0],
+				request,
+				resp,
+				bytes.NewReader(reqBody),
+				bytes.NewReader(respBody),
+			)
 		}
 
 		return rawData, resp, respReader, out.Errors
@@ -330,10 +344,13 @@ func (c *Client) processResponse(
 	if len(data) > 0 {
 		err := jsonutil.UnmarshalGraphQL(data, v)
 		if err != nil {
-			we := newError(ErrGraphQLDecode, err)
-			if c.debug {
-				we = we.withResponse(resp, respBuf)
-			}
+			we := c.DecorateError(
+				newError(ErrGraphQLDecode, err),
+				nil,
+				resp,
+				nil,
+				respBuf,
+			)
 			errs = append(errs, we)
 		}
 	}
@@ -364,6 +381,46 @@ func (c *Client) WithDebug(debug bool) *Client {
 		requestModifier: c.requestModifier,
 		debug:           debug,
 	}
+}
+
+// DecorateError decorates an error with request/response information if debug
+// mode is enabled. This helper method centralizes the error decoration logic
+// and eliminates repetitive debug checks throughout the codebase.
+func (c *Client) DecorateError(
+	err Error,
+	req *http.Request,
+	resp *http.Response,
+	reqBody,
+	respBody io.Reader,
+) Error {
+	if !c.debug {
+		return err
+	}
+
+	if req != nil && reqBody != nil {
+		err = err.withRequest(req, reqBody)
+	}
+
+	if resp != nil && respBody != nil {
+		err = err.withResponse(resp, respBody)
+	}
+
+	return err
+}
+
+// NewRequestError creates a new error with the given code and decorates it with
+// request/response information if debug mode is enabled. This is a convenience
+// method that combines error creation and decoration in one step.
+func (c *Client) NewRequestError(
+	code string,
+	err error,
+	req *http.Request,
+	resp *http.Response,
+	reqBody,
+	respBody io.Reader,
+) Error {
+	e := newError(code, err)
+	return c.DecorateError(e, req, resp, reqBody, respBody)
 }
 
 // errors represents the "errors" array in a response from a GraphQL server.

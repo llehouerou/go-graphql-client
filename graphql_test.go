@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/llehouerou/go-graphql-client"
@@ -985,4 +986,168 @@ func TestClient_QueryRaw_StructVariables(t *testing.T) {
 
 func stringPtr(s string) *string {
 	return &s
+}
+
+// TestClient_decorateError tests the helper method for decorating errors
+// based on debug mode settings.
+func TestClient_decorateError(t *testing.T) {
+	t.Run("debug mode enabled with request and response", func(t *testing.T) {
+		client := graphql.NewClient("http://example.com", nil).WithDebug(true)
+
+		// Create a mock request and response
+		reqBody := `{"query":"{test}"}`
+		req, err := http.NewRequest(http.MethodPost, "http://example.com", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp := &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}
+
+		baseErr := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"code": graphql.ErrRequestError,
+			},
+		}
+
+		// Call the helper method (which doesn't exist yet - this should fail)
+		decorated := client.DecorateError(
+			baseErr,
+			req,
+			resp,
+			strings.NewReader(reqBody),
+			strings.NewReader(`{"data":null}`),
+		)
+
+		// Verify request information was added
+		if decorated.Extensions == nil {
+			t.Fatal("expected Extensions to be non-nil")
+		}
+
+		internal, ok := decorated.Extensions["internal"].(map[string]any)
+		if !ok {
+			t.Fatal("expected internal extensions to exist")
+		}
+
+		if _, ok := internal["request"]; !ok {
+			t.Error("expected request information in internal extensions")
+		}
+
+		if _, ok := internal["response"]; !ok {
+			t.Error("expected response information in internal extensions")
+		}
+	})
+
+	t.Run("debug mode disabled", func(t *testing.T) {
+		client := graphql.NewClient("http://example.com", nil).WithDebug(false)
+
+		reqBody := `{"query":"{test}"}`
+		req, err := http.NewRequest(http.MethodPost, "http://example.com", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp := &http.Response{
+			StatusCode: 200,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}
+
+		baseErr := graphql.Error{
+			Message: "test error",
+			Extensions: map[string]any{
+				"code": graphql.ErrRequestError,
+			},
+		}
+
+		decorated := client.DecorateError(
+			baseErr,
+			req,
+			resp,
+			strings.NewReader(reqBody),
+			strings.NewReader(`{"data":null}`),
+		)
+
+		// In non-debug mode, internal extensions should not be added
+		if decorated.Extensions != nil {
+			if internal, ok := decorated.Extensions["internal"].(map[string]any); ok {
+				if len(internal) > 0 {
+					t.Error("expected no internal extensions in non-debug mode")
+				}
+			}
+		}
+
+		// The base error should still have the code
+		if code, ok := decorated.Extensions["code"].(string); !ok || code != graphql.ErrRequestError {
+			t.Error("expected code to be preserved")
+		}
+	})
+}
+
+// TestClient_newRequestError tests the convenience method for creating
+// and decorating errors in one step.
+func TestClient_newRequestError(t *testing.T) {
+	t.Run("creates error with code and message", func(t *testing.T) {
+		client := graphql.NewClient("http://example.com", nil)
+
+		err := client.NewRequestError(
+			graphql.ErrJsonDecode,
+			errors.New("json decode failed"),
+			nil,
+			nil,
+			nil,
+			nil,
+		)
+
+		if err.Message != "json decode failed" {
+			t.Errorf("expected message 'json decode failed', got %q", err.Message)
+		}
+
+		if code, ok := err.Extensions["code"].(string); !ok || code != graphql.ErrJsonDecode {
+			t.Errorf("expected code %q, got %v", graphql.ErrJsonDecode, code)
+		}
+	})
+
+	t.Run("decorates with debug info when enabled", func(t *testing.T) {
+		client := graphql.NewClient("http://example.com", nil).WithDebug(true)
+
+		reqBody := `{"query":"{test}"}`
+		req, err := http.NewRequest(http.MethodPost, "http://example.com", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp := &http.Response{
+			StatusCode: 500,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}
+
+		decoratedErr := client.NewRequestError(
+			graphql.ErrRequestError,
+			errors.New("server error"),
+			req,
+			resp,
+			strings.NewReader(reqBody),
+			strings.NewReader(`{"errors":[]}`),
+		)
+
+		if decoratedErr.Message != "server error" {
+			t.Errorf("expected message 'server error', got %q", decoratedErr.Message)
+		}
+
+		internal, ok := decoratedErr.Extensions["internal"].(map[string]any)
+		if !ok {
+			t.Fatal("expected internal extensions in debug mode")
+		}
+
+		if _, ok := internal["request"]; !ok {
+			t.Error("expected request information in debug mode")
+		}
+
+		if _, ok := internal["response"]; !ok {
+			t.Error("expected response information in debug mode")
+		}
+	})
 }
