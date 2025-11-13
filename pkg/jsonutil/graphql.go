@@ -20,7 +20,7 @@ import (
 //
 // The implementation is created on top of the JSON tokenizer available
 // in "encoding/json".Decoder.
-func UnmarshalGraphQL(data []byte, v interface{}) error {
+func UnmarshalGraphQL(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	err := (&decoder{tokenizer: dec}).Decode(v)
@@ -45,7 +45,7 @@ func UnmarshalGraphQL(data []byte, v interface{}) error {
 type decoder struct {
 	tokenizer interface {
 		Token() (json.Token, error)
-		Decode(v interface{}) error
+		Decode(v any) error
 	}
 
 	// Stack of what part of input JSON we're in the middle of - objects, arrays.
@@ -109,7 +109,7 @@ func (d *decoder) shouldIncludeFragmentByTag(tag string) bool {
 }
 
 // Decode decodes a single JSON value from d.tokenizer into v.
-func (d *decoder) Decode(v interface{}) error {
+func (d *decoder) Decode(v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr {
 		return fmt.Errorf("cannot decode into non-pointer %T", v)
@@ -126,7 +126,7 @@ func (d *decoder) decode() error {
 	// The loop invariant is that the top of each d.vs stack
 	// is where we try to unmarshal the next JSON value we see.
 	for len(d.vs) > 0 {
-		var tok interface{}
+		var tok any
 		tok, err := d.tokenizer.Token()
 
 		if err == io.EOF {
@@ -429,7 +429,7 @@ func copyTemplate(template reflect.Value) (reflect.Value, error) {
 	}
 	if template.Kind() == reflect.Map {
 		return reflect.Value{}, fmt.Errorf(
-			"unsupported template type `%v`, use [][2]interface{} for ordered map instead",
+			"unsupported template type `%v`, use [][2]any for ordered map instead",
 			template.Type(),
 		)
 	}
@@ -616,7 +616,7 @@ func extractFragmentTypename(tag string) string {
 // unmarshalValue unmarshals JSON value into v.
 // v must be addressable and not obtained by the use of unexported
 // struct fields, otherwise unmarshalValue will panic.
-func unmarshalValue(value interface{}, v reflect.Value) error {
+func unmarshalValue(value any, v reflect.Value) error {
 	b, err := json.Marshal(value) // TODO: Short-circuit (if profiling says it's worth it).
 	if err != nil {
 		return err

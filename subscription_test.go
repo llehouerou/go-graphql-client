@@ -43,7 +43,7 @@ func subscription_setupClients() (*Client, *SubscriptionClient) {
 	client := NewClient(endpoint, &http.Client{Transport: http.DefaultTransport})
 
 	subscriptionClient := NewSubscriptionClient(endpoint).
-		WithConnectionParams(map[string]interface{}{
+		WithConnectionParams(map[string]any{
 			"headers": map[string]string{
 				"foo": "bar",
 			},
@@ -255,7 +255,7 @@ func TestSubscriptionLifeCycle(t *testing.T) {
 			Msg String
 		} `graphql:"sayHello(msg: $msg)"`
 	}
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"msg": String(msg),
 	}
 	err = client.Mutate(context.Background(), &q, variables, OperationName("SayHello"))
@@ -392,7 +392,7 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 				Msg String
 			} `graphql:"sayHello(msg: $msg)"`
 		}
-		variables := map[string]interface{}{
+		variables := map[string]any{
 			"msg": String(msg),
 		}
 		err = client.Mutate(context.Background(), &q, variables, OperationName("SayHello"))

@@ -46,7 +46,7 @@ func constructOptions(options []Option) (*constructOptionsOutput, error) {
 }
 
 // ConstructQuery build GraphQL query string from struct and variables
-func ConstructQuery(v interface{}, variables interface{}, options ...Option) (string, error) {
+func ConstructQuery(v any, variables any, options ...Option) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -72,7 +72,7 @@ func ConstructQuery(v interface{}, variables interface{}, options ...Option) (st
 }
 
 // ConstructQuery build GraphQL mutation string from struct and variables
-func ConstructMutation(v interface{}, variables interface{}, options ...Option) (string, error) {
+func ConstructMutation(v any, variables any, options ...Option) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -96,7 +96,7 @@ func ConstructMutation(v interface{}, variables interface{}, options ...Option) 
 }
 
 // ConstructSubscription build GraphQL subscription string from struct and variables
-func ConstructSubscription(v interface{}, variables interface{}, options ...Option) (string, error) {
+func ConstructSubscription(v any, variables any, options ...Option) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -119,13 +119,13 @@ func ConstructSubscription(v interface{}, variables interface{}, options ...Opti
 
 // queryArguments constructs a minified arguments string for variables.
 //
-// E.g., map[string]interface{}{"a": int(123), "b": true} -> "$a:Int!$b:Boolean!".
-func queryArguments(variables interface{}) string {
+// E.g., map[string]any{"a": int(123), "b": true} -> "$a:Int!$b:Boolean!".
+func queryArguments(variables any) string {
 	var keys []string
 	var buf bytes.Buffer
 
 	switch v := variables.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		for k := range v {
 			keys = append(keys, k)
 		}
@@ -181,7 +181,7 @@ func queryArguments(variables interface{}) string {
 // writeArgumentType writes a minified GraphQL type for t to w.
 // value indicates whether t is a value (required) type or pointer (optional) type.
 // If value is true, then "!" is written at the end of t.
-func writeArgumentType(w io.Writer, t reflect.Type, v interface{}, value bool) {
+func writeArgumentType(w io.Writer, t reflect.Type, v any, value bool) {
 
 	if t.Implements(types.GraphqlTypeInterface) {
 		var graphqlType types.GraphQLType
@@ -241,7 +241,7 @@ func writeArgumentType(w io.Writer, t reflect.Type, v interface{}, value bool) {
 // a minified query string from the provided struct v.
 //
 // E.g., struct{Foo Int, BarBaz *bool} -> "{foo,barBaz}".
-func query(v interface{}) (string, error) {
+func query(v any) (string, error) {
 	var buf bytes.Buffer
 	err := writeQuery(&buf, reflect.TypeOf(v), reflect.ValueOf(v), false)
 	if err != nil {
@@ -364,7 +364,7 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 			}
 			return nil
 		}
-		// handle [][2]interface{} like an ordered map
+		// handle [][2]any like an ordered map
 		if t.Elem().Len() != 2 {
 			return fmt.Errorf("only arrays of len 2 are supported, got %v", t.Elem())
 		}
@@ -372,7 +372,7 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 		_, _ = io.WriteString(w, "{")
 		for i := 0; i < sliceOfPairs.Len(); i++ {
 			pair := sliceOfPairs.Index(i)
-			// it.Value() returns interface{}, so we need to use reflect.ValueOf
+			// it.Value() returns any, so we need to use reflect.ValueOf
 			// to cast it away
 			key, val := pair.Index(0), reflect.ValueOf(pair.Index(1).Interface())
 			keyString, ok := key.Interface().(string)
@@ -388,7 +388,7 @@ func writeQuery(w io.Writer, t reflect.Type, v reflect.Value, inline bool) error
 		}
 		_, _ = io.WriteString(w, "}")
 	case reflect.Map:
-		return fmt.Errorf("type %v is not supported, use [][2]interface{} instead", t)
+		return fmt.Errorf("type %v is not supported, use [][2]any instead", t)
 	}
 	return nil
 }

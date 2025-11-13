@@ -192,9 +192,9 @@ func TestClient_Query_noDataWithErrorResponse(t *testing.T) {
 		t.Errorf("got error: %v, want: %v", got, want)
 	}
 
-	interErr := gqlErr[0].Extensions["internal"].(map[string]interface{})
+	interErr := gqlErr[0].Extensions["internal"].(map[string]any)
 
-	if got, want := interErr["request"].(map[string]interface{})["body"], "{\"query\":\"{user{name}}\"}\n"; got != want {
+	if got, want := interErr["request"].(map[string]any)["body"], "{\"query\":\"{user{name}}\"}\n"; got != want {
 		t.Errorf("got error: %v, want: %v", got, want)
 	}
 }
@@ -246,9 +246,9 @@ func TestClient_Query_errorStatusCode(t *testing.T) {
 	if got, want := gqlErr[0].Extensions["code"], graphql.ErrRequestError; got != want {
 		t.Errorf("got error: %v, want: %v", got, want)
 	}
-	interErr := gqlErr[0].Extensions["internal"].(map[string]interface{})
+	interErr := gqlErr[0].Extensions["internal"].(map[string]any)
 
-	if got, want := interErr["request"].(map[string]interface{})["body"], "{\"query\":\"{user{name}}\"}\n"; got != want {
+	if got, want := interErr["request"].(map[string]any)["body"], "{\"query\":\"{user{name}}\"}\n"; got != want {
 		t.Errorf("got error: %v, want: %v", got, want)
 	}
 }
@@ -272,7 +272,7 @@ func TestClient_Query_emptyVariables(t *testing.T) {
 			Name string
 		}
 	}
-	err := client.Query(context.Background(), &q, map[string]interface{}{})
+	err := client.Query(context.Background(), &q, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestClient_Query_ignoreFields(t *testing.T) {
 			Ignored string `graphql:"-"`
 		}
 	}
-	err := client.Query(context.Background(), &q, map[string]interface{}{})
+	err := client.Query(context.Background(), &q, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestClient_Query_RawResponse(t *testing.T) {
 			Name string `graphql:"name"`
 		}
 	}
-	rawBytes, err := client.QueryRaw(context.Background(), &q, map[string]interface{}{})
+	rawBytes, err := client.QueryRaw(context.Background(), &q, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestClient_Exec_Query(t *testing.T) {
 		}
 	}
 
-	err := client.Exec(context.Background(), "{user{id,name}}", &q, map[string]interface{}{})
+	err := client.Exec(context.Background(), "{user{id,name}}", &q, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestClient_Exec_QueryRaw(t *testing.T) {
 		}
 	}
 
-	rawBytes, err := client.ExecRaw(context.Background(), "{user{id,name}}", map[string]interface{}{})
+	rawBytes, err := client.ExecRaw(context.Background(), "{user{id,name}}", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +559,7 @@ func TestClient_Query_withWrapper(t *testing.T) {
 	client := graphql.NewClient("/graphql", &http.Client{Transport: localRoundTripper{handler: mux}})
 
 	q := NewNestedQuery[Wrapper[Wrapped]]("testcontainer")
-	err := client.Query(context.Background(), &q, map[string]interface{}{})
+	err := client.Query(context.Background(), &q, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}

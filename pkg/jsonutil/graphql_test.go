@@ -140,7 +140,7 @@ func TestUnmarshalGraphQL_fieldAsScalar(t *testing.T) {
 }
 
 func TestUnmarshalGraphQL_orderedMap(t *testing.T) {
-	type query [][2]interface{}
+	type query [][2]any
 	got := query{
 		{"foo", ""},
 	}
@@ -168,7 +168,7 @@ func TestUnmarshalGraphQL_orderedMapWithPointers(t *testing.T) {
 	game1 := &GameFormation{}
 	game2 := &GameFormation{}
 
-	got := [][2]interface{}{
+	got := [][2]any{
 		{"game0:game(id:\"1\")", game1},
 		{"game1:game(id:\"2\")", game2},
 	}
@@ -206,7 +206,7 @@ func TestUnmarshalGraphQL_orderedMapAlias(t *testing.T) {
 	type Update struct {
 		Name string `graphql:"name"`
 	}
-	got := [][2]interface{}{
+	got := [][2]any{
 		{"update0:update(name:$name0)", &Update{}},
 		{"update1:update(name:$name1)", &Update{}},
 	}
@@ -221,7 +221,7 @@ func TestUnmarshalGraphQL_orderedMapAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][2]interface{}{
+	want := [][2]any{
 		{"update0:update(name:$name0)", &Update{Name: "grihabor"}},
 		{"update1:update(name:$name1)", &Update{Name: "diman"}},
 	}
@@ -301,10 +301,10 @@ func TestUnmarshalGraphQL_objectArray(t *testing.T) {
 
 func TestUnmarshalGraphQL_orderedMapArray(t *testing.T) {
 	type query struct {
-		Foo [][][2]interface{}
+		Foo [][][2]any
 	}
 	got := query{
-		Foo: [][][2]interface{}{
+		Foo: [][][2]any{
 			{{"name", ""}},
 		},
 	}
@@ -318,7 +318,7 @@ func TestUnmarshalGraphQL_orderedMapArray(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := query{
-		Foo: [][][2]interface{}{
+		Foo: [][][2]any{
 			{{"name", "bar"}},
 			{{"name", "baz"}},
 		},
@@ -386,10 +386,10 @@ func TestUnmarshalGraphQL_objectPointerArray(t *testing.T) {
 
 func TestUnmarshalGraphQL_orderedMapNullInArray(t *testing.T) {
 	type query struct {
-		Foo [][][2]interface{}
+		Foo [][][2]any
 	}
 	got := query{
-		Foo: [][][2]interface{}{
+		Foo: [][][2]any{
 			{{"name", ""}},
 		},
 	}
@@ -404,7 +404,7 @@ func TestUnmarshalGraphQL_orderedMapNullInArray(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := query{
-		Foo: [][][2]interface{}{
+		Foo: [][][2]any{
 			{{"name", "bar"}},
 			nil,
 			{{"name", "baz"}},
@@ -482,7 +482,7 @@ func TestUnmarshalGraphQL_multipleValues(t *testing.T) {
 }
 
 func TestUnmarshalGraphQL_multipleValuesInOrderedMap(t *testing.T) {
-	type query [][2]interface{}
+	type query [][2]any
 	q := query{{"foo", ""}}
 	err := jsonutil.UnmarshalGraphQL([]byte(`{"foo": "bar"}{"foo": "baz"}`), &q)
 	if err == nil {
@@ -562,11 +562,11 @@ func TestUnmarshalGraphQL_orderedMapUnion(t *testing.T) {
 			}
 		}
 	*/
-	closedEventActor := [][2]interface{}{{"login", ""}}
-	reopenedEventActor := [][2]interface{}{{"login", ""}}
-	closedEvent := [][2]interface{}{{"actor", closedEventActor}, {"createdAt", time.Time{}}}
-	reopenedEvent := [][2]interface{}{{"actor", reopenedEventActor}, {"createdAt", time.Time{}}}
-	got := [][2]interface{}{
+	closedEventActor := [][2]any{{"login", ""}}
+	reopenedEventActor := [][2]any{{"login", ""}}
+	closedEvent := [][2]any{{"actor", closedEventActor}, {"createdAt", time.Time{}}}
+	reopenedEvent := [][2]any{{"actor", reopenedEventActor}, {"createdAt", time.Time{}}}
+	got := [][2]any{
 		{"__typename", ""},
 		{"... on ClosedEvent", closedEvent},
 		{"... on ReopenedEvent", reopenedEvent},
@@ -581,20 +581,20 @@ func TestUnmarshalGraphQL_orderedMapUnion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := [][2]interface{}{
+	want := [][2]any{
 		{"__typename", "ClosedEvent"},
-		{"... on ClosedEvent", [][2]interface{}{
-			{"actor", [][2]interface{}{{"login", "shurcooL-test"}}},
+		{"... on ClosedEvent", [][2]any{
+			{"actor", [][2]any{{"login", "shurcooL-test"}}},
 			{"createdAt", time.Unix(1498709521, 0).UTC()},
 		}},
-		{"... on ReopenedEvent", [][2]interface{}{
-			{"actor", [][2]interface{}{{"login", ""}}},
+		{"... on ReopenedEvent", [][2]any{
+			{"actor", [][2]any{{"login", ""}}},
 			{"createdAt", time.Time{}},
 		}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("not equal:\ngot: %v\nwant: %v", got, want)
-		createdAt := got[1][1].([][2]interface{})[1]
+		createdAt := got[1][1].([][2]any)[1]
 		t.Logf("key: %s, type: %v", createdAt[0], reflect.TypeOf(createdAt[1]))
 	}
 }

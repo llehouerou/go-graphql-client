@@ -71,8 +71,8 @@ func (om OperationMessage) String() string {
 // ReadJSON and WriteJSON data of a frame from the WebSocket connection.
 // Close the WebSocket connection.
 type WebsocketConn interface {
-	ReadJSON(v interface{}) error
-	WriteJSON(v interface{}) error
+	ReadJSON(v any) error
+	WriteJSON(v any) error
 	Close() error
 	// SetReadLimit sets the maximum size in bytes for a message read from the peer. If a
 	// message exceeds the limit, the connection sends a close message to the peer
@@ -83,7 +83,7 @@ type WebsocketConn interface {
 type handlerFunc func(data []byte, err error) error
 type subscription struct {
 	query     string
-	variables map[string]interface{}
+	variables map[string]any
 	handler   func(data []byte, err error)
 	started   Boolean
 }
@@ -92,7 +92,7 @@ type subscription struct {
 type SubscriptionClient struct {
 	url              string
 	conn             WebsocketConn
-	connectionParams map[string]interface{}
+	connectionParams map[string]any
 	websocketOptions WebsocketOptions
 	context          context.Context
 	subscriptions    map[string]*subscription
@@ -101,7 +101,7 @@ type SubscriptionClient struct {
 	timeout          time.Duration
 	isRunning        int64
 	readLimit        int64 // max size of response message. Default 10 MB
-	log              func(args ...interface{})
+	log              func(args ...any)
 	createConn       func(sc *SubscriptionClient) (WebsocketConn, error)
 	retryTimeout     time.Duration
 	onConnected      func()
@@ -153,7 +153,7 @@ func (sc *SubscriptionClient) WithWebSocketOptions(options WebsocketOptions) *Su
 
 // WithConnectionParams updates connection params for sending to server through GQL_CONNECTION_INIT event
 // It's usually used for authentication handshake
-func (sc *SubscriptionClient) WithConnectionParams(params map[string]interface{}) *SubscriptionClient {
+func (sc *SubscriptionClient) WithConnectionParams(params map[string]any) *SubscriptionClient {
 	sc.connectionParams = params
 	return sc
 }
@@ -171,7 +171,7 @@ func (sc *SubscriptionClient) WithRetryTimeout(timeout time.Duration) *Subscript
 }
 
 // WithLog sets loging function to print out received messages. By default, nothing is printed
-func (sc *SubscriptionClient) WithLog(logger func(args ...interface{})) *SubscriptionClient {
+func (sc *SubscriptionClient) WithLog(logger func(args ...any)) *SubscriptionClient {
 	sc.log = logger
 	return sc
 }
@@ -255,14 +255,14 @@ func (sc *SubscriptionClient) init() error {
 	}
 }
 
-func (sc *SubscriptionClient) writeJSON(v interface{}) error {
+func (sc *SubscriptionClient) writeJSON(v any) error {
 	if sc.conn != nil {
 		return sc.conn.WriteJSON(v)
 	}
 	return nil
 }
 
-func (sc *SubscriptionClient) printLog(message interface{}, source string, opType OperationMessageType) {
+func (sc *SubscriptionClient) printLog(message any, source string, opType OperationMessageType) {
 	if sc.log == nil {
 		return
 	}
@@ -298,29 +298,29 @@ func (sc *SubscriptionClient) sendConnectionInit() (err error) {
 // Subscribe sends start message to server and open a channel to receive data.
 // The handler callback function will receive raw message data or error. If the call return error, onError event will be triggered
 // The function returns subscription ID and error. You can use subscription ID to unsubscribe the subscription
-func (sc *SubscriptionClient) Subscribe(v interface{}, variables map[string]interface{}, handler func(message []byte, err error) error, options ...Option) (string, error) {
+func (sc *SubscriptionClient) Subscribe(v any, variables map[string]any, handler func(message []byte, err error) error, options ...Option) (string, error) {
 	return sc.do(v, variables, handler, options...)
 }
 
 // NamedSubscribe sends start message to server and open a channel to receive data, with operation name
 //
 // Deprecated: this is the shortcut of Subscribe method, with NewOperationName option
-func (sc *SubscriptionClient) NamedSubscribe(name string, v interface{}, variables map[string]interface{}, handler func(message []byte, err error) error, options ...Option) (string, error) {
+func (sc *SubscriptionClient) NamedSubscribe(name string, v any, variables map[string]any, handler func(message []byte, err error) error, options ...Option) (string, error) {
 	return sc.do(v, variables, handler, append(options, OperationName(name))...)
 }
 
 // SubscribeRaw sends start message to server and open a channel to receive data, with raw query
 // Deprecated: use Exec instead
-func (sc *SubscriptionClient) SubscribeRaw(query string, variables map[string]interface{}, handler func(message []byte, err error) error) (string, error) {
+func (sc *SubscriptionClient) SubscribeRaw(query string, variables map[string]any, handler func(message []byte, err error) error) (string, error) {
 	return sc.doRaw(query, variables, handler)
 }
 
 // Exec sends start message to server and open a channel to receive data, with raw query
-func (sc *SubscriptionClient) Exec(query string, variables map[string]interface{}, handler func(message []byte, err error) error) (string, error) {
+func (sc *SubscriptionClient) Exec(query string, variables map[string]any, handler func(message []byte, err error) error) (string, error) {
 	return sc.doRaw(query, variables, handler)
 }
 
-func (sc *SubscriptionClient) do(v interface{}, variables map[string]interface{}, handler func(message []byte, err error) error, options ...Option) (string, error) {
+func (sc *SubscriptionClient) do(v any, variables map[string]any, handler func(message []byte, err error) error, options ...Option) (string, error) {
 	query, err := ConstructSubscription(v, variables, options...)
 	if err != nil {
 		return "", err
@@ -329,7 +329,7 @@ func (sc *SubscriptionClient) do(v interface{}, variables map[string]interface{}
 	return sc.doRaw(query, variables, handler)
 }
 
-func (sc *SubscriptionClient) doRaw(query string, variables map[string]interface{}, handler func(message []byte, err error) error) (string, error) {
+func (sc *SubscriptionClient) doRaw(query string, variables map[string]any, handler func(message []byte, err error) error) (string, error) {
 	id := uuid.New().String()
 
 	sub := subscription{
@@ -360,7 +360,7 @@ func (sc *SubscriptionClient) startSubscription(id string, sub *subscription) er
 
 	in := struct {
 		Query     string                 `json:"query"`
-		Variables map[string]interface{} `json:"variables,omitempty"`
+		Variables map[string]any `json:"variables,omitempty"`
 	}{
 		Query:     sub.query,
 		Variables: sub.variables,
@@ -645,14 +645,14 @@ type WebsocketHandler struct {
 	*websocket.Conn
 }
 
-func (wh *WebsocketHandler) WriteJSON(v interface{}) error {
+func (wh *WebsocketHandler) WriteJSON(v any) error {
 	ctx, cancel := context.WithTimeout(wh.ctx, wh.timeout)
 	defer cancel()
 
 	return wsjson.Write(ctx, wh.Conn, v)
 }
 
-func (wh *WebsocketHandler) ReadJSON(v interface{}) error {
+func (wh *WebsocketHandler) ReadJSON(v any) error {
 	ctx, cancel := context.WithTimeout(wh.ctx, wh.timeout)
 	defer cancel()
 	return wsjson.Read(ctx, wh.Conn, v)

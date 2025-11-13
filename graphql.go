@@ -42,14 +42,14 @@ func NewClient(url string, httpClient *http.Client) *Client {
 // Query executes a single GraphQL query request,
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
-func (c *Client) Query(ctx context.Context, q interface{}, variables interface{}, options ...Option) error {
+func (c *Client) Query(ctx context.Context, q any, variables any, options ...Option) error {
 	return c.do(ctx, queryOperation, q, variables, options...)
 }
 
 // Mutate executes a single GraphQL mutation request,
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
-func (c *Client) Mutate(ctx context.Context, m interface{}, variables interface{}, options ...Option) error {
+func (c *Client) Mutate(ctx context.Context, m any, variables any, options ...Option) error {
 	return c.do(ctx, mutationOperation, m, variables, options...)
 }
 
@@ -57,7 +57,7 @@ func (c *Client) Mutate(ctx context.Context, m interface{}, variables interface{
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
 // return raw bytes message.
-func (c *Client) QueryRaw(ctx context.Context, q interface{}, variables interface{}, options ...Option) ([]byte, error) {
+func (c *Client) QueryRaw(ctx context.Context, q any, variables any, options ...Option) ([]byte, error) {
 	return c.doRaw(ctx, queryOperation, q, variables, options...)
 }
 
@@ -65,12 +65,12 @@ func (c *Client) QueryRaw(ctx context.Context, q interface{}, variables interfac
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
 // return raw bytes message.
-func (c *Client) MutateRaw(ctx context.Context, m interface{}, variables interface{}, options ...Option) ([]byte, error) {
+func (c *Client) MutateRaw(ctx context.Context, m any, variables any, options ...Option) ([]byte, error) {
 	return c.doRaw(ctx, mutationOperation, m, variables, options...)
 }
 
 // buildAndRequest the common method that builds and send graphql request
-func (c *Client) buildAndRequest(ctx context.Context, op operationType, v interface{}, variables interface{}, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
+func (c *Client) buildAndRequest(ctx context.Context, op operationType, v any, variables any, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
 	var query string
 	var err error
 	switch op {
@@ -88,7 +88,7 @@ func (c *Client) buildAndRequest(ctx context.Context, op operationType, v interf
 }
 
 // Request the common method that send graphql request
-func (c *Client) request(ctx context.Context, query string, variables interface{}, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
+func (c *Client) request(ctx context.Context, query string, variables any, options ...Option) ([]byte, *http.Response, io.Reader, Errors) {
 	if variables != nil {
 		reflectVal := reflect.ValueOf(variables)
 		if reflectVal.Kind() == reflect.Map && reflectVal.Len() == 0 {
@@ -96,8 +96,8 @@ func (c *Client) request(ctx context.Context, query string, variables interface{
 		}
 	}
 	in := struct {
-		Query     string      `json:"query"`
-		Variables interface{} `json:"variables,omitempty"`
+		Query     string `json:"query"`
+		Variables any    `json:"variables,omitempty"`
 	}{
 		Query:     query,
 		Variables: variables,
@@ -210,7 +210,7 @@ func (c *Client) request(ctx context.Context, query string, variables interface{
 
 // do executes a single GraphQL operation.
 // return raw message and error
-func (c *Client) doRaw(ctx context.Context, op operationType, v interface{}, variables interface{}, options ...Option) ([]byte, error) {
+func (c *Client) doRaw(ctx context.Context, op operationType, v any, variables any, options ...Option) ([]byte, error) {
 	data, _, _, err := c.buildAndRequest(ctx, op, v, variables, options...)
 	if len(err) > 0 {
 		return data, err
@@ -219,21 +219,21 @@ func (c *Client) doRaw(ctx context.Context, op operationType, v interface{}, var
 }
 
 // do executes a single GraphQL operation and unmarshal json.
-func (c *Client) do(ctx context.Context, op operationType, v interface{}, variables interface{}, options ...Option) error {
+func (c *Client) do(ctx context.Context, op operationType, v any, variables any, options ...Option) error {
 	data, resp, respBuf, errs := c.buildAndRequest(ctx, op, v, variables, options...)
 	return c.processResponse(v, data, resp, respBuf, errs)
 }
 
 // Executes a pre-built query and unmarshals the response into v. Unlike the Query method you have to specify in the query the
 // fields that you want to receive as they are not inferred from v. This method is useful if you need to build the query dynamically.
-func (c *Client) Exec(ctx context.Context, query string, v interface{}, variables map[string]interface{}, options ...Option) error {
+func (c *Client) Exec(ctx context.Context, query string, v any, variables map[string]any, options ...Option) error {
 	data, resp, respBuf, errs := c.request(ctx, query, variables, options...)
 	return c.processResponse(v, data, resp, respBuf, errs)
 }
 
 // Executes a pre-built query and returns the raw json message. Unlike the Query method you have to specify in the query the
 // fields that you want to receive as they are not inferred from the interface. This method is useful if you need to build the query dynamically.
-func (c *Client) ExecRaw(ctx context.Context, query string, variables map[string]interface{}, options ...Option) ([]byte, error) {
+func (c *Client) ExecRaw(ctx context.Context, query string, variables map[string]any, options ...Option) ([]byte, error) {
 	data, _, _, errs := c.request(ctx, query, variables, options...)
 	if len(errs) > 0 {
 		return data, errs
@@ -241,7 +241,7 @@ func (c *Client) ExecRaw(ctx context.Context, query string, variables map[string
 	return data, nil
 }
 
-func (c *Client) processResponse(v interface{}, data []byte, resp *http.Response, respBuf io.Reader, errs Errors) error {
+func (c *Client) processResponse(v any, data []byte, resp *http.Response, respBuf io.Reader, errs Errors) error {
 	if len(data) > 0 {
 		err := jsonutil.UnmarshalGraphQL(data, v)
 		if err != nil {
@@ -288,8 +288,8 @@ func (c *Client) WithDebug(debug bool) *Client {
 type Errors []Error
 
 type Error struct {
-	Message    string                 `json:"message"`
-	Extensions map[string]interface{} `json:"extensions"`
+	Message    string         `json:"message"`
+	Extensions map[string]any `json:"extensions"`
 	Locations  []struct {
 		Line   int `json:"line"`
 		Column int `json:"column"`
@@ -310,22 +310,22 @@ func (e Errors) Error() string {
 	return b.String()
 }
 
-func (e Error) getInternalExtension() map[string]interface{} {
+func (e Error) getInternalExtension() map[string]any {
 	if e.Extensions == nil {
-		return make(map[string]interface{})
+		return make(map[string]any)
 	}
 
 	if ex, ok := e.Extensions["internal"]; ok {
-		return ex.(map[string]interface{})
+		return ex.(map[string]any)
 	}
 
-	return make(map[string]interface{})
+	return make(map[string]any)
 }
 
 func newError(code string, err error) Error {
 	return Error{
 		Message: err.Error(),
-		Extensions: map[string]interface{}{
+		Extensions: map[string]any{
 			"code": code,
 		},
 	}
@@ -337,14 +337,14 @@ func (e Error) withRequest(req *http.Request, bodyReader io.Reader) Error {
 	if err != nil {
 		internal["error"] = err
 	} else {
-		internal["request"] = map[string]interface{}{
+		internal["request"] = map[string]any{
 			"headers": req.Header,
 			"body":    string(bodyBytes),
 		}
 	}
 
 	if e.Extensions == nil {
-		e.Extensions = make(map[string]interface{})
+		e.Extensions = make(map[string]any)
 	}
 	e.Extensions["internal"] = internal
 	return e
@@ -356,7 +356,7 @@ func (e Error) withResponse(res *http.Response, bodyReader io.Reader) Error {
 	if err != nil {
 		internal["error"] = err
 	} else {
-		internal["response"] = map[string]interface{}{
+		internal["response"] = map[string]any{
 			"headers": res.Header,
 			"body":    string(bodyBytes),
 		}
@@ -372,7 +372,7 @@ func (e Error) withResponse(res *http.Response, bodyReader io.Reader) Error {
 // The implementation is created on top of the JSON tokenizer available
 // in "encoding/json".Decoder.
 // This function is re-exported from the internal package
-func UnmarshalGraphQL(data []byte, v interface{}) error {
+func UnmarshalGraphQL(data []byte, v any) error {
 	return jsonutil.UnmarshalGraphQL(data, v)
 }
 
