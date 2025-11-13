@@ -1254,6 +1254,144 @@ func TestClient_buildRequest(t *testing.T) {
 	})
 }
 
+// TestClient_ImmutablePattern tests that With* methods follow the immutable
+// pattern by returning new Client instances without modifying the original.
+func TestClient_ImmutablePattern(t *testing.T) {
+	t.Run("WithDebug returns new instance", func(t *testing.T) {
+		original := graphql.NewClient("http://example.com/graphql", nil)
+
+		// Call WithDebug and verify it returns a different instance
+		modified := original.WithDebug(true)
+
+		// The returned client should be a different instance
+		if modified == original {
+			t.Error("WithDebug returned the same instance (expected new instance)")
+		}
+
+		// Further modification should not affect the first modified instance
+		modified2 := modified.WithDebug(false)
+		if modified2 == modified || modified2 == original {
+			t.Error("second WithDebug call should return yet another new instance")
+		}
+	})
+
+	t.Run("WithRequestModifier returns new instance", func(t *testing.T) {
+		original := graphql.NewClient("http://example.com/graphql", nil)
+
+		// Original has no modifier
+		ctx := context.Background()
+		req, _, err := original.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if req.Header.Get("X-Test") != "" {
+			t.Error("original client should not have the header")
+		}
+
+		// Call WithRequestModifier but don't capture the result
+		_ = original.WithRequestModifier(func(r *http.Request) {
+			r.Header.Set("X-Test", "modified")
+		})
+
+		// Original should still have no modifier effect
+		req, _, err = original.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if req.Header.Get("X-Test") != "" {
+			t.Error("WithRequestModifier modified the original client (expected immutable)")
+		}
+
+		// Captured result should have the modifier
+		modified := original.WithRequestModifier(func(r *http.Request) {
+			r.Header.Set("X-Test", "modified")
+		})
+		req, _, err = modified.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if req.Header.Get("X-Test") != "modified" {
+			t.Error("WithRequestModifier didn't return a client with the modifier")
+		}
+	})
+
+	t.Run("chaining With methods works correctly", func(t *testing.T) {
+		original := graphql.NewClient("http://example.com/graphql", nil)
+
+		// Chain methods
+		modified := original.
+			WithDebug(true).
+			WithRequestModifier(func(r *http.Request) {
+				r.Header.Set("X-Chain", "test")
+			})
+
+		// Modified client should be a different instance
+		if modified == original {
+			t.Error("chained client should be a new instance")
+		}
+
+		// Modified client should have the modifier
+		ctx := context.Background()
+		req, _, err := modified.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if req.Header.Get("X-Chain") != "test" {
+			t.Error("chained client should have the modifier")
+		}
+
+		// Original should not have the modifier
+		req, _, err = original.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if req.Header.Get("X-Chain") != "" {
+			t.Error("original client should not have the modifier")
+		}
+	})
+
+	t.Run("chaining order doesn't matter", func(t *testing.T) {
+		original := graphql.NewClient("http://example.com/graphql", nil)
+
+		// Chain in one order
+		client1 := original.
+			WithDebug(true).
+			WithRequestModifier(func(r *http.Request) {
+				r.Header.Set("X-Order", "1")
+			})
+
+		// Chain in reverse order
+		client2 := original.
+			WithRequestModifier(func(r *http.Request) {
+				r.Header.Set("X-Order", "2")
+			}).
+			WithDebug(true)
+
+		// Both should be new instances
+		if client1 == original || client2 == original || client1 == client2 {
+			t.Error("all clients should be different instances")
+		}
+
+		// Both should have their modifiers
+		ctx := context.Background()
+		req1, _, err := client1.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if req1.Header.Get("X-Order") != "1" {
+			t.Error("client1 should have its modifier")
+		}
+
+		req2, _, err := client2.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if req2.Header.Get("X-Order") != "2" {
+			t.Error("client2 should have its modifier")
+		}
+	})
+}
+
 // TestClient_executeRequest tests the executeRequest method that executes
 // the HTTP request and handles gzip decompression
 func TestClient_executeRequest(t *testing.T) {

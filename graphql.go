@@ -18,6 +18,25 @@ import (
 type RequestModifier func(*http.Request)
 
 // Client is a GraphQL client.
+//
+// # Immutable Pattern
+//
+// The Client's With* methods (WithDebug, WithRequestModifier) follow an
+// immutable pattern: they return a new Client instance rather than modifying
+// the receiver. This allows for safe concurrent use and makes it clear when
+// configuration changes take effect.
+//
+// Always use the returned Client:
+//
+//	client = client.WithDebug(true)  // Correct
+//	client.WithDebug(true)            // Wrong - original client unchanged
+//
+// Methods can be chained since each returns a new Client:
+//
+//	client = client.WithDebug(true).WithRequestModifier(modifier)
+//
+// Note: This differs from SubscriptionClient, whose With* methods modify
+// the receiver and return self (mutable/builder pattern).
 type Client struct {
 	url             string // GraphQL server URL.
 	httpClient      *http.Client
@@ -424,9 +443,20 @@ func (c *Client) processResponse(
 	return nil
 }
 
-// Returns a copy of the client with the request modifier set. This allows you to reuse the same
-// TCP connection for multiple slightly different requests to the same server
-// (i.e. different authentication headers for multitenant applications)
+// WithRequestModifier returns a new Client with the request modifier set.
+// This allows you to reuse the same TCP connection for multiple slightly
+// different requests to the same server (e.g., different authentication
+// headers for multitenant applications).
+//
+// This method follows an immutable pattern: it returns a NEW Client instance
+// without modifying the original. You must use the returned Client:
+//
+//	client = client.WithRequestModifier(modifier)  // Correct
+//	client.WithRequestModifier(modifier)            // Wrong - has no effect
+//
+// The method can be chained with other With* methods:
+//
+//	client = client.WithRequestModifier(modifier).WithDebug(true)
 func (c *Client) WithRequestModifier(f RequestModifier) *Client {
 	return &Client{
 		url:             c.url,
@@ -435,7 +465,19 @@ func (c *Client) WithRequestModifier(f RequestModifier) *Client {
 	}
 }
 
-// WithDebug enable debug mode to print internal error detail
+// WithDebug returns a new Client with debug mode enabled or disabled.
+// When enabled, debug mode adds detailed request/response information to
+// error extensions, which is useful for troubleshooting GraphQL API issues.
+//
+// This method follows an immutable pattern: it returns a NEW Client instance
+// without modifying the original. You must use the returned Client:
+//
+//	client = client.WithDebug(true)  // Correct
+//	client.WithDebug(true)            // Wrong - has no effect
+//
+// The method can be chained with other With* methods:
+//
+//	client = client.WithDebug(true).WithRequestModifier(modifier)
 func (c *Client) WithDebug(debug bool) *Client {
 	return &Client{
 		url:             c.url,
