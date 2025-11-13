@@ -119,31 +119,8 @@ func (c *Client) request(
 	variables any,
 	options ...Option,
 ) ([]byte, *http.Response, io.Reader, Errors) {
-	// Normalize empty variable maps to nil
-	if !hasVariables(variables) {
-		variables = nil
-	}
-	in := struct {
-		Query     string `json:"query"`
-		Variables any    `json:"variables,omitempty"`
-	}{
-		Query:     query,
-		Variables: variables,
-	}
-	var buf bytes.Buffer
-	err := json.NewEncoder(&buf).Encode(in)
-	if err != nil {
-		return nil, nil, nil, Errors{newError(ErrGraphQLEncode, err)}
-	}
-
-	reqBody := buf.Bytes()
-	reqReader := bytes.NewReader(reqBody)
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		c.url,
-		reqReader,
-	)
+	// Build HTTP request with JSON body
+	request, reqBody, err := c.BuildRequest(ctx, query, variables)
 	if err != nil {
 		e := c.NewRequestError(
 			ErrRequestError,
@@ -155,21 +132,9 @@ func (c *Client) request(
 		)
 		return nil, nil, nil, Errors{e}
 	}
-	request.Header.Add("Content-Type", "application/json")
 
-	if c.requestModifier != nil {
-		c.requestModifier(request)
-	}
-
+	// Execute HTTP request
 	resp, err := c.httpClient.Do(request)
-
-	if c.debug {
-		_, _ = reqReader.Seek(
-			0,
-			io.SeekStart,
-		) // Ignore seek errors for debug logging
-	}
-
 	if err != nil {
 		e := c.NewRequestError(
 			ErrRequestError,
@@ -185,6 +150,7 @@ func (c *Client) request(
 
 	r := resp.Body
 
+	// Handle gzip decompression
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gr, err := gzip.NewReader(r)
 		if err != nil {
@@ -199,6 +165,7 @@ func (c *Client) request(
 		r = gr
 	}
 
+	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		err := c.NewRequestError(
@@ -212,16 +179,11 @@ func (c *Client) request(
 		return nil, nil, nil, Errors{err}
 	}
 
-	var out struct {
-		Data   *json.RawMessage
-		Errors Errors
-	}
-
-	// copy the response reader for debugging
+	// Copy response body for debugging if needed
 	var respBody []byte
 	var respReader *bytes.Reader
 	if c.debug {
-		respBody, err = io.ReadAll(resp.Body)
+		respBody, err = io.ReadAll(r)
 		if err != nil {
 			return nil, nil, nil, Errors{newError(ErrJsonDecode, err)}
 		}
@@ -229,25 +191,137 @@ func (c *Client) request(
 		r = io.NopCloser(respReader)
 	}
 
-	err = json.NewDecoder(r).Decode(&out)
+	// Decode GraphQL response
+	rawData, gqlErrors := c.DecodeResponse(r)
 
 	if c.debug {
-		_, _ = respReader.Seek(
-			0,
-			io.SeekStart,
-		) // Ignore seek errors for debug logging
+		if respReader != nil {
+			_, _ = respReader.Seek(
+				0,
+				io.SeekStart,
+			) // Ignore seek errors for debug logging
+		}
 	}
 
+	// Handle JSON decode errors
+	if gqlErrors != nil && len(gqlErrors) > 0 {
+		// Check if it's a decode error (has ErrJsonDecode code)
+		if code, ok := gqlErrors[0].Extensions["code"].(string); ok && code == ErrJsonDecode {
+			we := c.NewRequestError(
+				ErrJsonDecode,
+				fmt.Errorf("%s", gqlErrors[0].Message),
+				request,
+				resp,
+				bytes.NewReader(reqBody),
+				bytes.NewReader(respBody),
+			)
+			return nil, nil, nil, Errors{we}
+		}
+
+		// Handle GraphQL errors - decorate first error if debug mode
+		if c.debug &&
+			(gqlErrors[0].Extensions == nil || gqlErrors[0].Extensions["request"] == nil) {
+			gqlErrors[0] = c.DecorateError(
+				gqlErrors[0],
+				request,
+				resp,
+				bytes.NewReader(reqBody),
+				bytes.NewReader(respBody),
+			)
+		}
+
+		return rawData, resp, respReader, gqlErrors
+	}
+
+	return rawData, resp, respReader, nil
+}
+
+// BuildRequest constructs an HTTP request with JSON body for a GraphQL operation.
+// It returns the HTTP request and the request body bytes (useful for error decoration).
+func (c *Client) BuildRequest(
+	ctx context.Context,
+	query string,
+	variables any,
+) (*http.Request, []byte, error) {
+	// Normalize empty variable maps to nil
+	if !hasVariables(variables) {
+		variables = nil
+	}
+	in := struct {
+		Query     string `json:"query"`
+		Variables any    `json:"variables,omitempty"`
+	}{
+		Query:     query,
+		Variables: variables,
+	}
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(in)
 	if err != nil {
-		we := c.NewRequestError(
-			ErrJsonDecode,
-			err,
-			request,
-			resp,
-			bytes.NewReader(reqBody),
-			bytes.NewReader(respBody),
-		)
-		return nil, nil, nil, Errors{we}
+		return nil, nil, err
+	}
+
+	reqBody := buf.Bytes()
+	reqReader := bytes.NewReader(reqBody)
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.url,
+		reqReader,
+	)
+	if err != nil {
+		return nil, reqBody, err
+	}
+	request.Header.Add("Content-Type", "application/json")
+
+	if c.requestModifier != nil {
+		c.requestModifier(request)
+	}
+
+	return request, reqBody, nil
+}
+
+// ExecuteRequest executes an HTTP request and handles gzip decompression.
+// It returns the HTTP response and a reader for the (possibly decompressed) body.
+func (c *Client) ExecuteRequest(req *http.Request) (*http.Response, io.Reader, error) {
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	r := resp.Body
+
+	// Handle gzip decompression
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gr, err := gzip.NewReader(r)
+		if err != nil {
+			_ = resp.Body.Close()
+			return nil, nil, fmt.Errorf("problem trying to create gzip reader: %w", err)
+		}
+		// Note: caller is responsible for closing both gr and resp.Body
+		r = gr
+	}
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(r)
+		_ = resp.Body.Close()
+		return nil, nil, fmt.Errorf("%v; body: %q", resp.Status, body)
+	}
+
+	return resp, r, nil
+}
+
+// DecodeResponse decodes a GraphQL JSON response into raw data and errors.
+// It returns the raw data bytes (if present) and any GraphQL errors.
+func (c *Client) DecodeResponse(reader io.Reader) ([]byte, Errors) {
+	var out struct {
+		Data   *json.RawMessage
+		Errors Errors
+	}
+
+	err := json.NewDecoder(reader).Decode(&out)
+	if err != nil {
+		return nil, Errors{newError(ErrJsonDecode, err)}
 	}
 
 	var rawData []byte
@@ -256,21 +330,10 @@ func (c *Client) request(
 	}
 
 	if len(out.Errors) > 0 {
-		if c.debug &&
-			(out.Errors[0].Extensions == nil || out.Errors[0].Extensions["request"] == nil) {
-			out.Errors[0] = c.DecorateError(
-				out.Errors[0],
-				request,
-				resp,
-				bytes.NewReader(reqBody),
-				bytes.NewReader(respBody),
-			)
-		}
-
-		return rawData, resp, respReader, out.Errors
+		return rawData, out.Errors
 	}
 
-	return rawData, resp, respReader, nil
+	return rawData, nil
 }
 
 // do executes a single GraphQL operation.
