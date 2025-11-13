@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"reflect"
 	"strings"
@@ -151,7 +150,7 @@ func (c *Client) request(ctx context.Context, query string, variables interface{
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		err := newError(ErrRequestError, fmt.Errorf("%v; body: %q", resp.Status, body))
 
 		if c.debug {
@@ -168,7 +167,7 @@ func (c *Client) request(ctx context.Context, query string, variables interface{
 	// copy the response reader for debugging
 	var respReader *bytes.Reader
 	if c.debug {
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, nil, nil, Errors{newError(ErrJsonDecode, err)}
 		}
@@ -334,7 +333,7 @@ func newError(code string, err error) Error {
 
 func (e Error) withRequest(req *http.Request, bodyReader io.Reader) Error {
 	internal := e.getInternalExtension()
-	bodyBytes, err := ioutil.ReadAll(bodyReader)
+	bodyBytes, err := io.ReadAll(bodyReader)
 	if err != nil {
 		internal["error"] = err
 	} else {
@@ -353,7 +352,7 @@ func (e Error) withRequest(req *http.Request, bodyReader io.Reader) Error {
 
 func (e Error) withResponse(res *http.Response, bodyReader io.Reader) Error {
 	internal := e.getInternalExtension()
-	bodyBytes, err := ioutil.ReadAll(bodyReader)
+	bodyBytes, err := io.ReadAll(bodyReader)
 	if err != nil {
 		internal["error"] = err
 	} else {
