@@ -46,3 +46,55 @@ func IsNillable(kind reflect.Kind) bool {
 		return false
 	}
 }
+
+// UnwrapToConcreteValue unwraps pointers and interfaces to get to the concrete value.
+// This is a common pattern used throughout the codebase to get past indirection layers.
+// Returns the concrete value, or an invalid reflect.Value if unwrapping fails.
+//
+// Example:
+//   var x **int
+//   v := reflect.ValueOf(x)
+//   concrete := UnwrapToConcreteValue(v) // returns the int value (if not nil)
+func UnwrapToConcreteValue(v reflect.Value) reflect.Value {
+	for v.IsValid() && (v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface) {
+		if v.IsNil() {
+			return reflect.Value{}
+		}
+		v = v.Elem()
+	}
+	return v
+}
+
+// IsNilValue safely checks if a reflect.Value is nil.
+// Returns true if:
+// - The value is invalid
+// - The value's kind can hold nil (pointer, interface, slice, map, chan, func) AND it is nil
+// Returns false for non-nillable kinds (int, string, struct, etc.)
+//
+// This consolidates the common pattern of checking both the kind and IsNil().
+func IsNilValue(v reflect.Value) bool {
+	if !v.IsValid() {
+		return true
+	}
+	return IsNillable(v.Kind()) && v.IsNil()
+}
+
+// NewZeroOrPointerValue creates a new reflect.Value based on the type.
+// If t is a pointer type, it creates a pointer to a new zero value: reflect.New(t.Elem())
+// If t is a non-pointer type, it creates a zero value: reflect.Zero(t)
+//
+// This is useful when you need to instantiate a value of a type but don't know
+// if it's a pointer or not.
+//
+// Example:
+//   t := reflect.TypeOf((*int)(nil))  // *int
+//   v := NewZeroOrPointerValue(t)      // returns new(int)
+//
+//   t := reflect.TypeOf(0)             // int
+//   v := NewZeroOrPointerValue(t)      // returns zero int
+func NewZeroOrPointerValue(t reflect.Type) reflect.Value {
+	if t.Kind() == reflect.Ptr {
+		return reflect.New(t.Elem())
+	}
+	return reflect.Zero(t)
+}
