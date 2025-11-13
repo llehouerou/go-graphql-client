@@ -1,2 +1,21 @@
 .idea/
 CHANGELOG.md
+
+# Binaries
+graphqldev
+realworld
+subscription
+
+# Test binaries
+*.test
+
+# Coverage files
+coverage.out
+coverage.html
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib

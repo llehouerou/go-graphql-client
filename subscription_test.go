@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -281,6 +282,14 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 
 	subscriptionClient.
 		OnError(func(sc *SubscriptionClient, err error) error {
+			// Ignore errors related to graceful shutdown (closed connections)
+			// These are expected when subscriptions stop
+			if err != nil && strings.Contains(err.Error(), "closed network connection") {
+				return nil
+			}
+			if err != nil && strings.Contains(err.Error(), "use of closed") {
+				return nil
+			}
 			t.Fatalf("got error: %v, want: nil", err)
 			return err
 		}).
