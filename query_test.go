@@ -1696,3 +1696,320 @@ func TestWrapper(t *testing.T) {
 		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
 	}
 }
+
+// TestWrapper_NilPointer tests wrapper with nil pointer value
+func TestWrapper_NilPointer(t *testing.T) {
+	type Query struct {
+		Container struct {
+			Wrapper *Wrapper[Wrapped] `graphql:"wrapper"`
+		} `graphql:"container"`
+	}
+	q := Query{} // Wrapper is nil
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// Should skip nil pointer wrapper field
+	want := `{container{}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_Nested tests nested wrappers (Wrapper[Wrapper[T]])
+func TestWrapper_Nested(t *testing.T) {
+	type DoubleWrapped struct {
+		Inner Wrapper[Wrapped]
+	}
+	type Query struct {
+		Container struct {
+			Outer Wrapper[DoubleWrapped] `graphql:"outer"`
+		} `graphql:"container"`
+	}
+	q := Query{}
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// GetGraphQLType() returns "wrapper", so field is named "wrapper" not "outer"
+	// The inner struct has a Wrapper field which also becomes "wrapper"
+	want := `{container{wrapper{wrapper{value}}}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_SingleStruct tests wrapper with single struct (not slice)
+func TestWrapper_SingleStruct(t *testing.T) {
+	type Query struct {
+		Container struct {
+			Single Wrapper[Wrapped] `graphql:"single"`
+		} `graphql:"container"`
+	}
+	q := Query{}
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// GetGraphQLType() returns "wrapper", overriding the graphql tag
+	want := `{container{wrapper{value}}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_PointerContent tests wrapper with pointer wrapped content
+func TestWrapper_PointerContent(t *testing.T) {
+	type Query struct {
+		Container struct {
+			PtrWrapper Wrapper[*Wrapped] `graphql:"ptrWrapper"`
+		} `graphql:"container"`
+	}
+	q := Query{}
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// GetGraphQLType() returns "wrapper", overriding the graphql tag
+	want := `{container{wrapper{value}}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_PrimitiveContent tests wrapper with primitive types
+func TestWrapper_PrimitiveContent(t *testing.T) {
+	t.Run("StringWrapper", func(t *testing.T) {
+		type Query struct {
+			Container struct {
+				StringWrap Wrapper[string] `graphql:"stringWrap"`
+			} `graphql:"container"`
+		}
+		q := Query{}
+		got, err := ConstructQuery(q, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// GetGraphQLType() returns "wrapper", and primitive types are scalars
+		want := `{container{wrapper}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+		}
+	})
+
+	t.Run("IntWrapper", func(t *testing.T) {
+		type Query struct {
+			Container struct {
+				IntWrap Wrapper[int] `graphql:"intWrap"`
+			} `graphql:"container"`
+		}
+		q := Query{}
+		got, err := ConstructQuery(q, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// GetGraphQLType() returns "wrapper", and primitive types are scalars
+		want := `{container{wrapper}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+		}
+	})
+}
+
+// TestWrapper_MultipleFields tests struct with multiple wrapper fields
+func TestWrapper_MultipleFields(t *testing.T) {
+	type Query struct {
+		Container struct {
+			Wrapper1 Wrapper[Wrapped]  `graphql:"wrapper1"`
+			Wrapper2 Wrapper[Wrappeds] `graphql:"wrapper2"`
+			Normal   string             `graphql:"normal"`
+		} `graphql:"container"`
+	}
+	q := Query{}
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// Both wrappers become "wrapper" (GetGraphQLType() overrides graphql tags)
+	want := `{container{wrapper{value},wrapper{value},normal}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_CustomGraphQLTag tests that GetGraphQLType() overrides graphql tag
+func TestWrapper_CustomGraphQLTag(t *testing.T) {
+	type Query struct {
+		Container struct {
+			MyWrapper Wrapper[Wrapped] `graphql:"customName(arg: 123)"`
+		} `graphql:"container"`
+	}
+	q := Query{}
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// GetGraphQLType() returns "wrapper", overriding the graphql tag completely
+	want := `{container{wrapper{value}}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_SkipTag tests that GetGraphQLType() overrides ALL tags including "-"
+func TestWrapper_SkipTag(t *testing.T) {
+	type Query struct {
+		Container struct {
+			SkipMe  Wrapper[Wrapped] `graphql:"-"`
+			KeepMe  Wrapper[Wrapped] `graphql:"keepMe"`
+		} `graphql:"container"`
+	}
+	q := Query{}
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// When a type implements GetGraphQLType(), it takes precedence over ALL tags,
+	// including skip tags. This is intentional: GetGraphQLType() explicitly declares
+	// the GraphQL representation, overriding tag-based configuration.
+	// Both fields become "wrapper" regardless of graphql tags.
+	want := `{container{wrapper{value},wrapper{value}}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_ScalarTag tests wrapper with scalar tag
+func TestWrapper_ScalarTag(t *testing.T) {
+	type Query struct {
+		Container struct {
+			ScalarWrapper Wrapper[Wrapped] `graphql:"scalarWrapper" scalar:"true"`
+			NormalWrapper Wrapper[Wrapped] `graphql:"normalWrapper"`
+		} `graphql:"container"`
+	}
+	q := Query{}
+	got, err := ConstructQuery(q, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// GetGraphQLType() returns "wrapper" for both (overrides graphql tags)
+	// scalar:"true" prevents expansion, so ScalarWrapper is a leaf
+	want := `{container{wrapper,wrapper{value}}}`
+	if got != want {
+		t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+	}
+}
+
+// TestWrapper_EmbeddedAnonymous documents Go method promotion with Wrapper types
+//
+// KEY INSIGHT: Anonymous Wrapper[T] fields promote BOTH methods to the parent:
+//   1. GetGraphQLType() → field name becomes "wrapper"
+//   2. GetGraphQLWrapped() → unwraps, skipping sibling fields
+//
+// RECOMMENDATION: Don't use anonymous Wrapper[T] with sibling fields!
+func TestWrapper_EmbeddedAnonymous(t *testing.T) {
+	type EmbeddedWrapper struct {
+		Wrapper[Wrapped]
+	}
+
+	t.Run("AnonymousEmbedWithOtherField", func(t *testing.T) {
+		type Query struct {
+			Container struct {
+				EmbeddedWrapper // anonymous: promotes Wrapper methods to Container
+				Other string `graphql:"other"`
+			} `graphql:"container"`
+		}
+		q := Query{}
+		got, err := ConstructQuery(q, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// Go method promotion causes Container to inherit:
+		//   - GetGraphQLType() → "wrapper" (overrides graphql:"container")
+		//   - GetGraphQLWrapped() → returns Wrapped{}, skips Other field
+		want := `{wrapper{value}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+		}
+	})
+
+	t.Run("AnonymousEmbedOnly", func(t *testing.T) {
+		type Query struct {
+			Container struct {
+				EmbeddedWrapper
+			} `graphql:"container"`
+		}
+		q := Query{}
+		got, err := ConstructQuery(q, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// Same method promotion: Container becomes "wrapper", gets unwrapped
+		want := `{wrapper{value}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+		}
+	})
+
+	t.Run("DirectAnonymousWrapper", func(t *testing.T) {
+		type Query struct {
+			Container struct {
+				Wrapper[Wrapped]
+				Other string `graphql:"other"`
+			} `graphql:"container"`
+		}
+		q := Query{}
+		got, err := ConstructQuery(q, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// Direct anonymous Wrapper: same issue, methods promoted to Container
+		want := `{wrapper{value}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+		}
+	})
+
+	t.Run("NamedEmbedWrapper", func(t *testing.T) {
+		type Query struct {
+			Container struct {
+				Embed EmbeddedWrapper // NAMED field - no method promotion!
+				Other string `graphql:"other"`
+			} `graphql:"container"`
+		}
+		q := Query{}
+		got, err := ConstructQuery(q, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// Named field: Container keeps graphql:"container", both fields work!
+		// Embed.Wrapper field implements GetGraphQLType() → becomes "wrapper"
+		want := `{container{wrapper{value},other}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+		}
+	})
+
+	t.Run("SimpleAnonymousStruct", func(t *testing.T) {
+		type SimpleEmbed struct {
+			Value string `graphql:"value"`
+		}
+		type Query struct {
+			Container struct {
+				SimpleEmbed
+				Other string `graphql:"other"`
+			} `graphql:"container"`
+		}
+		q := Query{}
+		got, err := ConstructQuery(q, nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// Simple anonymous struct without wrapper methods: works as expected
+		// Fields are properly inlined
+		want := `{container{value,other}}`
+		if got != want {
+			t.Errorf("\ngot:  %q\nwant: %q\n", got, want)
+		}
+	})
+}
