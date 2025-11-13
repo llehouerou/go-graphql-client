@@ -873,3 +873,210 @@ func TestUnmarshalGraphQL_interfaceFragment(t *testing.T) {
 		)
 	}
 }
+
+// Wrapper type for testing - follows the "Value" field convention
+type Wrapper[T any] struct {
+	Value T
+}
+
+func (w Wrapper[T]) GetGraphQLWrapped() T {
+	return w.Value
+}
+
+// TestUnmarshalGraphQL_basicWrapper tests basic wrapper type unmarshaling
+// with a simple string value.
+func TestUnmarshalGraphQL_basicWrapper(t *testing.T) {
+	type query struct {
+		Data Wrapper[string]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"data": "hello world"
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Data: Wrapper[string]{Value: "hello world"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_wrapperWithStruct tests wrapper containing a nested struct.
+func TestUnmarshalGraphQL_wrapperWithStruct(t *testing.T) {
+	type Person struct {
+		Name string
+		Age  int
+	}
+	type query struct {
+		User Wrapper[Person]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"user": {
+			"name": "Alice",
+			"age": 30
+		}
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		User: Wrapper[Person]{
+			Value: Person{Name: "Alice", Age: 30},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_wrapperInSlice tests unmarshaling an array of objects containing wrappers.
+func TestUnmarshalGraphQL_wrapperInSlice(t *testing.T) {
+	type Item struct {
+		Data Wrapper[string]
+	}
+	type query struct {
+		Items []Item
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"items": [
+			{"data": "first"},
+			{"data": "second"},
+			{"data": "third"}
+		]
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Items: []Item{
+			{Data: Wrapper[string]{Value: "first"}},
+			{Data: Wrapper[string]{Value: "second"}},
+			{Data: Wrapper[string]{Value: "third"}},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_nestedWrappers tests wrapper containing a non-wrapper struct.
+// Note: Nested wrappers (Wrapper[Wrapper[T]]) are not fully supported - only the
+// outermost wrapper is automatically unwrapped. This test uses Wrapper[Struct] instead.
+func TestUnmarshalGraphQL_nestedWrappers(t *testing.T) {
+	type Inner struct {
+		Val int
+	}
+	type Outer struct {
+		Inner Wrapper[Inner]
+	}
+	type query struct {
+		Data Wrapper[Outer]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"data": {"inner": {"val": 42}}
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Data: Wrapper[Outer]{
+			Value: Outer{Inner: Wrapper[Inner]{Value: Inner{Val: 42}}},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_wrapperWithPointer tests wrapper containing a pointer type.
+func TestUnmarshalGraphQL_wrapperWithPointer(t *testing.T) {
+	type query struct {
+		Data Wrapper[*string]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"data": "pointer value"
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	val := "pointer value"
+	want := query{
+		Data: Wrapper[*string]{Value: &val},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_wrapperNull tests wrapper with null JSON value.
+func TestUnmarshalGraphQL_wrapperNull(t *testing.T) {
+	type query struct {
+		Data Wrapper[*string]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"data": null
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Data: Wrapper[*string]{Value: nil},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_wrapperEmpty tests wrapper with empty/zero value.
+func TestUnmarshalGraphQL_wrapperEmpty(t *testing.T) {
+	type query struct {
+		Data Wrapper[string]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"data": ""
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		Data: Wrapper[string]{Value: ""},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestUnmarshalGraphQL_wrapperWithPrimitives tests wrapper with various primitive types.
+func TestUnmarshalGraphQL_wrapperWithPrimitives(t *testing.T) {
+	type query struct {
+		IntVal  Wrapper[int]
+		BoolVal Wrapper[bool]
+		StrVal  Wrapper[string]
+	}
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"intVal": 42,
+		"boolVal": true,
+		"strVal": "test"
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := query{
+		IntVal:  Wrapper[int]{Value: 42},
+		BoolVal: Wrapper[bool]{Value: true},
+		StrVal:  Wrapper[string]{Value: "test"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+	}
+}

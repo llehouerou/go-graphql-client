@@ -20,6 +20,28 @@ import (
 //
 // The implementation is created on top of the JSON tokenizer available
 // in "encoding/json".Decoder.
+//
+// # Wrapper Types
+//
+// UnmarshalGraphQL supports transparent unwrapping of container types that
+// implement the GetGraphQLWrapped() method. This allows GraphQL schemas with
+// wrapper/container patterns to be cleanly represented in Go.
+//
+// Convention: Any type implementing GetGraphQLWrapped() MUST have an exported
+// field named "Value" that holds the wrapped data. During unmarshaling, the
+// library will detect the GetGraphQLWrapped() method and unmarshal JSON data
+// directly into the Value field, bypassing the wrapper.
+//
+// Rationale: The GetGraphQLWrapped() method returns a value (used during query
+// construction for reflection), but unmarshaling requires a writable field
+// reference. The "Value" field provides this writable target.
+//
+// Example:
+//
+//	type Wrapper[T any] struct {
+//	    Value T  // REQUIRED: Must be named "Value"
+//	}
+//	func (w Wrapper[T]) GetGraphQLWrapped() T { return w.Value }
 func UnmarshalGraphQL(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
@@ -187,6 +209,9 @@ func (d *decoder) decode() error {
 						if fwrapper.IsValid() {
 							method := fwrapper.MethodByName("GetGraphQLWrapped")
 							if method.IsValid() {
+								// Wrapper type detected. Per convention, the wrapped data
+								// must be in a field named "Value". Unmarshal directly into
+								// the Value field, bypassing the wrapper.
 								wrapped := fwrapper.FieldByName("Value")
 								if wrapped.IsValid() {
 									f = wrapped
@@ -281,6 +306,8 @@ func (d *decoder) decode() error {
 				for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 					v = v.Elem()
 				}
+				// Check if this is a wrapper type (has GetGraphQLWrapped method).
+				// If so, unwrap to get the actual slice field per "Value" convention.
 				fwrapper := v
 				if fwrapper.IsValid() {
 					method := fwrapper.MethodByName("GetGraphQLWrapped")

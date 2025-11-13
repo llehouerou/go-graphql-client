@@ -620,6 +620,95 @@ func TestClient_Query_withWrapper(t *testing.T) {
 
 }
 
+// TestClient_Query_multiLevelNesting tests wrapper with multiple nesting levels
+// to validate the GetNodes() traversal logic.
+func TestClient_Query_multiLevelNesting(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+		body := mustRead(req.Body)
+		expected := `{"query":"{layer1{layer2{layer3{wrapper{value1,value2{type,id}}}}}}"}`+ "\n"
+		if got := body; got != expected {
+			t.Errorf("got body: %v, want %v", got, expected)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		mustWrite(
+			w,
+			`{"data": {"layer1": {"layer2": {"layer3": {"wrapper": {"value1": "Deep", "value2": {"type": "nested", "id": "456"}}}}}}}`,
+		)
+	})
+	client := graphql.NewClient(
+		"/graphql",
+		&http.Client{Transport: localRoundTripper{handler: mux}},
+	)
+
+	// Create nested query with 3 container layers
+	q := NewNestedQuery[Wrapper[Wrapped]]("layer1", "layer2", "layer3")
+	err := client.Query(context.Background(), &q, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify GetNodes() correctly traverses all layers
+	nodes := q.GetNodes()
+	if got, want := nodes.Value.Value1, "Deep"; got != want {
+		t.Errorf("got Value1: %q, want: %q", got, want)
+	}
+	if got, want := nodes.Value.Value2.Type, "nested"; got != want {
+		t.Errorf("got Type: %q, want: %q", got, want)
+	}
+	if got, want := nodes.Value.Value2.ID, "456"; got != want {
+		t.Errorf("got ID: %q, want: %q", got, want)
+	}
+}
+
+// TestClient_Mutation_withWrapper tests mutations with wrapped types
+// to ensure wrappers work correctly in mutation operations.
+func TestClient_Mutation_withWrapper(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+		body := mustRead(req.Body)
+		// Note: Mutation with variables includes type definition
+		expected := `{"query":"mutation ($name:String!){createUser(name: $name){wrapper{value1,value2{type,id}}}}","variables":{"name":"Alice"}}`+ "\n"
+		if got := body; got != expected {
+			t.Errorf("got body: %v, want %v", got, expected)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		mustWrite(
+			w,
+			`{"data": {"createUser": {"wrapper": {"value1": "Alice", "value2": {"type": "user", "id": "789"}}}}}`,
+		)
+	})
+	client := graphql.NewClient(
+		"/graphql",
+		&http.Client{Transport: localRoundTripper{handler: mux}},
+	)
+
+	var m struct {
+		CreateUser struct {
+			Wrapper Wrapper[Wrapped]
+		} `graphql:"createUser(name: $name)"`
+	}
+
+	variables := map[string]any{
+		"name": "Alice",
+	}
+
+	err := client.Mutate(context.Background(), &m, variables)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := m.CreateUser.Wrapper.Value.Value1, "Alice"; got != want {
+		t.Errorf("got Value1: %q, want: %q", got, want)
+	}
+	if got, want := m.CreateUser.Wrapper.Value.Value2.Type, "user"; got != want {
+		t.Errorf("got Type: %q, want: %q", got, want)
+	}
+	if got, want := m.CreateUser.Wrapper.Value.Value2.ID, "789"; got != want {
+		t.Errorf("got ID: %q, want: %q", got, want)
+	}
+}
+
 // TestClient_Query_StructVariables tests end-to-end client Query with struct variables
 // This validates the struct-based variable support added in commit e2d1096.
 func TestClient_Query_StructVariables(t *testing.T) {
