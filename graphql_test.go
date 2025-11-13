@@ -619,3 +619,281 @@ func TestClient_Query_withWrapper(t *testing.T) {
 	}
 
 }
+
+// TestClient_Query_StructVariables tests end-to-end client Query with struct variables
+// This validates the struct-based variable support added in commit e2d1096.
+func TestClient_Query_StructVariables(t *testing.T) {
+	tests := []struct {
+		name          string
+		variables     any
+		responseBody  string
+		validateQuery func(t *testing.T, q any)
+		validateVars  func(t *testing.T, vars map[string]any)
+	}{
+		{
+			name: "struct with basic types",
+			variables: struct {
+				CharacterID graphql.ID `json:"characterId"`
+				Name        string     `json:"name"`
+			}{
+				CharacterID: graphql.ID("1003"),
+				Name:        "Han Solo",
+			},
+			responseBody: `{"data":{"hero":{"name":"Han Solo"}}}`,
+			validateQuery: func(t *testing.T, q any) {
+				query := q.(*struct {
+					Hero struct {
+						Name string
+					} `graphql:"hero(id: $characterId, name: $name)"`
+				})
+				if got, want := query.Hero.Name, "Han Solo"; got != want {
+					t.Errorf("got Hero.Name: %q, want: %q", got, want)
+				}
+			},
+			validateVars: func(t *testing.T, vars map[string]any) {
+				if got, want := vars["characterId"], "1003"; got != want {
+					t.Errorf(
+						"got characterId: %v, want: %v",
+						got,
+						want,
+					)
+				}
+				if got, want := vars["name"], "Han Solo"; got != want {
+					t.Errorf("got name: %v, want: %v", got, want)
+				}
+			},
+		},
+		{
+			name: "struct with pointer fields (nullable)",
+			variables: struct {
+				CharacterID *graphql.ID `json:"characterId"`
+				Name        *string     `json:"name"`
+			}{
+				CharacterID: graphql.NewID("1003"),
+				Name:        stringPtr("Luke"),
+			},
+			responseBody: `{"data":{"hero":{"name":"Luke Skywalker"}}}`,
+			validateQuery: func(t *testing.T, q any) {
+				query := q.(*struct {
+					Hero struct {
+						Name string
+					} `graphql:"hero(id: $characterId, name: $name)"`
+				})
+				if got, want := query.Hero.Name, "Luke Skywalker"; got != want {
+					t.Errorf("got Hero.Name: %q, want: %q", got, want)
+				}
+			},
+			validateVars: func(t *testing.T, vars map[string]any) {
+				if got, want := vars["characterId"], "1003"; got != want {
+					t.Errorf("got characterId: %v, want: %v", got, want)
+				}
+				if got, want := vars["name"], "Luke"; got != want {
+					t.Errorf("got name: %v, want: %v", got, want)
+				}
+			},
+		},
+		{
+			name: "backward compatibility with map",
+			variables: map[string]any{
+				"characterId": graphql.ID("2000"),
+			},
+			responseBody: `{"data":{"hero":{"name":"C-3PO"}}}`,
+			validateQuery: func(t *testing.T, q any) {
+				query := q.(*struct {
+					Hero struct {
+						Name string
+					} `graphql:"hero(id: $characterId)"`
+				})
+				if got, want := query.Hero.Name, "C-3PO"; got != want {
+					t.Errorf("got Hero.Name: %q, want: %q", got, want)
+				}
+			},
+			validateVars: func(t *testing.T, vars map[string]any) {
+				// JSON unmarshaling converts graphql.ID to string
+				if got, want := vars["characterId"], "2000"; got != want {
+					t.Errorf("got characterId: %v, want: %v", got, want)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+				body := mustRead(req.Body)
+
+				// Parse the request to validate variables were properly serialized
+				var reqBody struct {
+					Query     string         `json:"query"`
+					Variables map[string]any `json:"variables,omitempty"`
+				}
+				if err := json.Unmarshal([]byte(body), &reqBody); err != nil {
+					t.Fatalf(
+						"failed to unmarshal request body: %v",
+						err,
+					)
+				}
+
+				// Validate variables if test specifies validation
+				if tc.validateVars != nil && len(reqBody.Variables) > 0 {
+					tc.validateVars(t, reqBody.Variables)
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				mustWrite(w, tc.responseBody)
+			})
+			client := graphql.NewClient(
+				"/graphql",
+				&http.Client{Transport: localRoundTripper{handler: mux}},
+			)
+
+			// Build the appropriate query struct based on test case
+			var q any
+			switch tc.name {
+			case "struct with basic types", "struct with pointer fields (nullable)":
+				q = &struct {
+					Hero struct {
+						Name string
+					} `graphql:"hero(id: $characterId, name: $name)"`
+				}{}
+			case "backward compatibility with map":
+				q = &struct {
+					Hero struct {
+						Name string
+					} `graphql:"hero(id: $characterId)"`
+				}{}
+			}
+
+			err := client.Query(context.Background(), q, tc.variables)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tc.validateQuery != nil {
+				tc.validateQuery(t, q)
+			}
+		})
+	}
+}
+
+// TestClient_Mutate_StructVariables tests end-to-end client Mutate with struct variables
+func TestClient_Mutate_StructVariables(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+		body := mustRead(req.Body)
+
+		// Parse and validate variables were serialized
+		var reqBody struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.Unmarshal([]byte(body), &reqBody); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+
+		// Validate struct variables were properly serialized
+		if got, want := reqBody.Variables["userId"], "456"; got != want {
+			t.Errorf("got userId: %v, want: %v", got, want)
+		}
+		if got, want := reqBody.Variables["name"], "Jane Smith"; got != want {
+			t.Errorf("got name: %v, want: %v", got, want)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		mustWrite(w, `{"data":{"updateUser":{"id":"456","name":"Jane Smith"}}}`)
+	})
+	client := graphql.NewClient(
+		"/graphql",
+		&http.Client{Transport: localRoundTripper{handler: mux}},
+	)
+
+	variables := struct {
+		UserID graphql.ID `json:"userId"`
+		Name   string     `json:"name"`
+	}{
+		UserID: graphql.ID("456"),
+		Name:   "Jane Smith",
+	}
+
+	var m struct {
+		UpdateUser struct {
+			ID   graphql.ID
+			Name string
+		} `graphql:"updateUser(id: $userId, name: $name)"`
+	}
+
+	err := client.Mutate(context.Background(), &m, variables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got, want := m.UpdateUser.ID, graphql.ID("456"); got != want {
+		t.Errorf("got UpdateUser.ID: %v, want: %v", got, want)
+	}
+	if got, want := m.UpdateUser.Name, "Jane Smith"; got != want {
+		t.Errorf("got UpdateUser.Name: %v, want: %v", got, want)
+	}
+}
+
+// TestClient_QueryRaw_StructVariables tests QueryRaw with struct variables
+// Validates that struct variables are properly serialized in HTTP request
+func TestClient_QueryRaw_StructVariables(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+		body := mustRead(req.Body)
+
+		// Verify the variables are properly serialized
+		var reqBody struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.Unmarshal([]byte(body), &reqBody); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+
+		// The key validation: struct variables were serialized to JSON
+		if got, want := reqBody.Variables["characterId"], "1003"; got != want {
+			t.Errorf("got characterId: %q, want: %q", got, want)
+		}
+		if got, want := reqBody.Variables["name"], "Han Solo"; got != want {
+			t.Errorf("got name: %q, want: %q", got, want)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		mustWrite(w, `{"data":{"hero":{"name":"Han Solo"}}}`)
+	})
+	client := graphql.NewClient(
+		"/graphql",
+		&http.Client{Transport: localRoundTripper{handler: mux}},
+	)
+
+	variables := struct {
+		CharacterID graphql.ID `json:"characterId"`
+		Name        string     `json:"name"`
+	}{
+		CharacterID: graphql.ID("1003"),
+		Name:        "Han Solo",
+	}
+
+	var q struct {
+		Hero struct {
+			Name string
+		} `graphql:"hero(id: $characterId, name: $name)"`
+	}
+
+	// QueryRaw returns raw bytes and populates the struct
+	rawResp, err := client.QueryRaw(context.Background(), &q, variables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify we got a response
+	if len(rawResp) == 0 {
+		t.Error("expected non-empty raw response")
+	}
+}
+
+func stringPtr(s string) *string {
+	return &s
+}

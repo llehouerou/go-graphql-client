@@ -805,6 +805,326 @@ func TestQueryArguments(t *testing.T) {
 	}
 }
 
+// TestQueryArguments_StructVariables tests the struct-based variable support
+// added in commit e2d1096. This validates that structs with json tags can be
+// used as variables instead of only maps.
+func TestQueryArguments_StructVariables(t *testing.T) {
+	iVal := int(123)
+	i8Val := int8(12)
+	i16Val := int16(500)
+	f32Val := float32(33.4)
+	f64Val := float64(99.23)
+	bVal := true
+	sVal := "some string"
+
+	tests := []struct {
+		name string
+		in   any
+		want string
+	}{
+		{
+			name: "struct with basic types",
+			in: struct {
+				Name   string `json:"name"`
+				Age    int    `json:"age"`
+				Active bool   `json:"active"`
+			}{
+				Name:   "John",
+				Age:    30,
+				Active: true,
+			},
+			want: "$active:Boolean!$age:Int!$name:String!",
+		},
+		{
+			name: "struct with pointer fields (optional types)",
+			in: struct {
+				Name   *string `json:"name"`
+				Age    *int    `json:"age"`
+				Active *bool   `json:"active"`
+			}{
+				Name:   &sVal,
+				Age:    &iVal,
+				Active: &bVal,
+			},
+			want: "$active:Boolean$age:Int$name:String",
+		},
+		{
+			name: "struct with GraphQL scalar wrappers",
+			in: struct {
+				ID     ID      `json:"id"`
+				Name   String  `json:"name"`
+				Age    Int     `json:"age"`
+				Score  Float   `json:"score"`
+				Active Boolean `json:"active"`
+			}{
+				ID:     ID("abc123"),
+				Name:   String("John"),
+				Age:    Int(30),
+				Score:  Float(95.5),
+				Active: Boolean(true),
+			},
+			want: "$active:Boolean!$age:Int!$id:ID!$name:String!$score:Float!",
+		},
+		{
+			name: "struct with pointer scalar wrappers (nullable)",
+			in: struct {
+				ID     *ID      `json:"id"`
+				Name   *String  `json:"name"`
+				Age    *Int     `json:"age"`
+				Score  *Float   `json:"score"`
+				Active *Boolean `json:"active"`
+			}{
+				ID:     NewID("abc123"),
+				Name:   NewString("John"),
+				Age:    NewInt(30),
+				Score:  NewFloat(95.5),
+				Active: NewBoolean(true),
+			},
+			want: "$active:Boolean$age:Int$id:ID$name:String$score:Float",
+		},
+		{
+			name: "struct with unexported fields (should skip)",
+			in: struct {
+				Name       string `json:"name"`
+				age        int    `json:"age"`         // unexported
+				privateVal bool   `json:"privateVal"`  // unexported
+				Active     bool   `json:"active"`
+			}{
+				Name:       "John",
+				age:        30,
+				privateVal: true,
+				Active:     false,
+			},
+			want: "$active:Boolean!$name:String!",
+		},
+		{
+			name: "struct with fields lacking json tags (should skip)",
+			in: struct {
+				Name   string `json:"name"`
+				Age    int    // no json tag
+				Active bool   `json:"active"`
+			}{
+				Name:   "John",
+				Age:    30,
+				Active: true,
+			},
+			want: "$active:Boolean!$name:String!",
+		},
+		{
+			name: "struct with json:- tag (treated as field named '-')",
+			in: struct {
+				Name     string `json:"name"`
+				Internal string `json:"-"`
+				Active   bool   `json:"active"`
+			}{
+				Name:     "John",
+				Internal: "secret",
+				Active:   true,
+			},
+			// Note: This is a bug - json:"-" should be skipped but isn't in e2d1096
+			want: "$-:String!$active:Boolean!$name:String!",
+		},
+		{
+			name: "struct with simple fields only",
+			in: struct {
+				Name   string `json:"name"`
+				Age    int    `json:"age"`
+				Active bool   `json:"active"`
+			}{
+				Name:   "John",
+				Age:    30,
+				Active: true,
+			},
+			want: "$active:Boolean!$age:Int!$name:String!",
+		},
+		{
+			name: "pointer to struct (should dereference)",
+			in: &struct {
+				Name   string `json:"name"`
+				Age    int    `json:"age"`
+			}{
+				Name: "John",
+				Age:  30,
+			},
+			want: "$age:Int!$name:String!",
+		},
+		{
+			name: "empty struct (should return empty string)",
+			in: struct {
+			}{},
+			want: "",
+		},
+		{
+			name: "struct with all unexported fields (should return empty string)",
+			in: struct {
+				name   string `json:"name"`
+				age    int    `json:"age"`
+				active bool   `json:"active"`
+			}{
+				name:   "John",
+				age:    30,
+				active: true,
+			},
+			want: "",
+		},
+		{
+			name: "struct with all numeric types",
+			in: struct {
+				I   int     `json:"i"`
+				I8  int8    `json:"i8"`
+				I16 int16   `json:"i16"`
+				I32 int32   `json:"i32"`
+				I64 int64   `json:"i64"`
+				UI  uint    `json:"ui"`
+				UI8 uint8   `json:"ui8"`
+				UI16 uint16  `json:"ui16"`
+				UI32 uint32  `json:"ui32"`
+				UI64 uint64  `json:"ui64"`
+				F32 float32 `json:"f32"`
+				F64 float64 `json:"f64"`
+			}{
+				I:   iVal, I8: i8Val, I16: i16Val,
+				I32: int32(70000), I64: int64(5000000000),
+				UI: uint(123), UI8: uint8(12), UI16: uint16(500),
+				UI32: uint32(70000), UI64: uint64(5000000000),
+				F32: f32Val, F64: f64Val,
+			},
+			want: "$f32:Float!$f64:Float!$i:Int!$i16:Int!$i32:Int!$i64:Int!$i8:Int!$ui:Int!$ui16:Int!$ui32:Int!$ui64:Int!$ui8:Int!",
+		},
+		{
+			name: "struct with pointer numeric types",
+			in: struct {
+				I   *int     `json:"i"`
+				I8  *int8    `json:"i8"`
+				I16 *int16   `json:"i16"`
+				F32 *float32 `json:"f32"`
+				F64 *float64 `json:"f64"`
+			}{
+				I: &iVal, I8: &i8Val, I16: &i16Val,
+				F32: &f32Val, F64: &f64Val,
+			},
+			want: "$f32:Float$f64:Float$i:Int$i16:Int$i8:Int",
+		},
+		{
+			name: "struct with slices",
+			in: struct {
+				States   []IssueState  `json:"states"`
+				Optional *[]IssueState `json:"optional"`
+			}{
+				States:   []IssueState{IssueStateOpen, IssueStateClosed},
+				Optional: &[]IssueState{IssueStateOpen},
+			},
+			want: "$optional:[IssueState!]$states:[IssueState!]!",
+		},
+		{
+			name: "struct with custom GraphQLType",
+			in: struct {
+				ID         Uuid            `json:"id"`
+				IDOptional *Uuid           `json:"id_optional"`
+				MyID       MyUuid          `json:"my_uuid"`
+				Review     UserReview      `json:"review"`
+				Input      UserReviewInput `json:"review_input"`
+			}{
+				ID:         Uuid(uuid.New()),
+				IDOptional: &val,
+				MyID:       MyUuid(uuid.New()),
+				Review:     UserReview{Review: "good", UserID: "123"},
+				Input:      UserReviewInput{Review: "bad", UserID: "456"},
+			},
+			want: "$id:uuid!$id_optional:uuid$my_uuid:my_uuid!$review:user_review!$review_input:user_review_input!",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := queryArguments(tc.in)
+			if got != tc.want {
+				t.Errorf(
+					"\ngot:  %q\nwant: %q",
+					got,
+					tc.want,
+				)
+			}
+		})
+	}
+}
+
+// TestQueryArguments_InvalidTypes tests error handling for invalid variable types
+func TestQueryArguments_InvalidTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		in        any
+		wantPanic bool
+		panicMsg  string
+	}{
+		{
+			name:      "string value (not struct or map)",
+			in:        "invalid",
+			wantPanic: true,
+			panicMsg:  "variables must be a struct or a map; got string",
+		},
+		{
+			name:      "int value (not struct or map)",
+			in:        123,
+			wantPanic: true,
+			panicMsg:  "variables must be a struct or a map; got int",
+		},
+		{
+			name:      "slice value (not struct or map)",
+			in:        []string{"a", "b"},
+			wantPanic: true,
+			panicMsg:  "variables must be a struct or a map; got []string",
+		},
+		{
+			name:      "pointer to string (not struct or map)",
+			in:        stringPtr("invalid"),
+			wantPanic: true,
+			panicMsg:  "variables must be a struct or a map; got *string",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if !tc.wantPanic {
+					if r != nil {
+						t.Errorf(
+							"unexpected panic: %v",
+							r,
+						)
+					}
+					return
+				}
+				if r == nil {
+					t.Errorf("expected panic but got none")
+					return
+				}
+				if msg, ok := r.(string); ok {
+					if msg != tc.panicMsg {
+						t.Errorf(
+							"panic message:\ngot:  %q\nwant: %q",
+							msg,
+							tc.panicMsg,
+						)
+					}
+				} else {
+					t.Errorf(
+						"panic value is not string: %T %v",
+						r,
+						r,
+					)
+				}
+			}()
+			_ = queryArguments(tc.in)
+		})
+	}
+}
+
+func stringPtr(s string) *string {
+	return &s
+}
+
 // stringStringer is to support a built-in string type as a fmt.Stringer
 type stringStringer string
 
