@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/llehouerou/go-graphql-client/ident"
+	"github.com/llehouerou/go-graphql-client/internal/reflectutil"
 	"github.com/llehouerou/go-graphql-client/types"
 )
 
@@ -47,8 +48,29 @@ func constructOptions(options []Option) (*constructOptionsOutput, error) {
 	return output, nil
 }
 
-// ConstructQuery build GraphQL query string from struct and variables
-func ConstructQuery(v any, variables any, options ...Option) (string, error) {
+// hasVariables checks if variables exist and should be used.
+// Returns false for nil or empty maps, true otherwise.
+func hasVariables(variables any) bool {
+	if variables == nil {
+		return false
+	}
+	reflectVal := reflect.ValueOf(variables)
+	// If it's not a map, we have variables
+	// If it's a map, only return true if it has entries
+	return reflectVal.Kind() != reflect.Map || reflectVal.Len() > 0
+}
+
+// constructOperation builds a GraphQL operation string from struct and variables.
+// operationType should be "query", "mutation", or "subscription".
+// includeOperationTypeInDefault determines whether to prepend the operation type
+// when no operation name or directives are specified (true for mutation/subscription, false for query).
+func constructOperation(
+	operationType string,
+	v any,
+	variables any,
+	includeOperationTypeInDefault bool,
+	options ...Option,
+) (string, error) {
 	query, err := query(v)
 	if err != nil {
 		return "", err
@@ -59,111 +81,55 @@ func ConstructQuery(v any, variables any, options ...Option) (string, error) {
 		return "", err
 	}
 
-	if variables != nil {
-		reflectVal := reflect.ValueOf(variables)
-		if reflectVal.Kind() != reflect.Map ||
-			(reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
-			return fmt.Sprintf(
-				"query %s(%s)%s%s",
-				optionsOutput.operationName,
-				queryArguments(variables),
-				optionsOutput.OperationDirectivesString(),
-				query,
-			), nil
-		}
+	if hasVariables(variables) {
+		return fmt.Sprintf(
+			"%s %s(%s)%s%s",
+			operationType,
+			optionsOutput.operationName,
+			queryArguments(variables),
+			optionsOutput.OperationDirectivesString(),
+			query,
+		), nil
 	}
 
 	if optionsOutput.operationName == "" &&
 		len(optionsOutput.operationDirectives) == 0 {
+		if includeOperationTypeInDefault {
+			return operationType + query, nil
+		}
 		return query, nil
 	}
 
 	return fmt.Sprintf(
-		"query %s%s%s",
+		"%s %s%s%s",
+		operationType,
 		optionsOutput.operationName,
 		optionsOutput.OperationDirectivesString(),
 		query,
 	), nil
 }
 
-// ConstructQuery build GraphQL mutation string from struct and variables
+// ConstructQuery builds GraphQL query string from struct and variables
+func ConstructQuery(v any, variables any, options ...Option) (string, error) {
+	return constructOperation("query", v, variables, false, options...)
+}
+
+// ConstructMutation builds GraphQL mutation string from struct and variables
 func ConstructMutation(
 	v any,
 	variables any,
 	options ...Option,
 ) (string, error) {
-	query, err := query(v)
-	if err != nil {
-		return "", err
-	}
-	optionsOutput, err := constructOptions(options)
-	if err != nil {
-		return "", err
-	}
-	if variables != nil {
-		reflectVal := reflect.ValueOf(variables)
-		if reflectVal.Kind() != reflect.Map ||
-			(reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
-			return fmt.Sprintf(
-				"mutation %s(%s)%s%s",
-				optionsOutput.operationName,
-				queryArguments(variables),
-				optionsOutput.OperationDirectivesString(),
-				query,
-			), nil
-		}
-	}
-
-	if optionsOutput.operationName == "" &&
-		len(optionsOutput.operationDirectives) == 0 {
-		return "mutation" + query, nil
-	}
-
-	return fmt.Sprintf(
-		"mutation %s%s%s",
-		optionsOutput.operationName,
-		optionsOutput.OperationDirectivesString(),
-		query,
-	), nil
+	return constructOperation("mutation", v, variables, true, options...)
 }
 
-// ConstructSubscription build GraphQL subscription string from struct and variables
+// ConstructSubscription builds GraphQL subscription string from struct and variables
 func ConstructSubscription(
 	v any,
 	variables any,
 	options ...Option,
 ) (string, error) {
-	query, err := query(v)
-	if err != nil {
-		return "", err
-	}
-	optionsOutput, err := constructOptions(options)
-	if err != nil {
-		return "", err
-	}
-	if variables != nil {
-		reflectVal := reflect.ValueOf(variables)
-		if reflectVal.Kind() != reflect.Map ||
-			(reflectVal.Kind() == reflect.Map && reflectVal.Len() > 0) {
-			return fmt.Sprintf(
-				"subscription %s(%s)%s%s",
-				optionsOutput.operationName,
-				queryArguments(variables),
-				optionsOutput.OperationDirectivesString(),
-				query,
-			), nil
-		}
-	}
-	if optionsOutput.operationName == "" &&
-		len(optionsOutput.operationDirectives) == 0 {
-		return "subscription" + query, nil
-	}
-	return fmt.Sprintf(
-		"subscription %s%s%s",
-		optionsOutput.operationName,
-		optionsOutput.OperationDirectivesString(),
-		query,
-	), nil
+	return constructOperation("subscription", v, variables, true, options...)
 }
 
 // queryArguments constructs a minified arguments string for variables.
@@ -353,14 +319,14 @@ func writeQuery(
 			return fmt.Errorf("failed to write query for interface `%v`: %w", t, err)
 		}
 	case reflect.Ptr:
-		err := writeQuery(w, t.Elem(), ElemSafe(v), false)
+		err := writeQuery(w, t.Elem(), reflectutil.ElemSafe(v), false)
 		if err != nil {
 			return fmt.Errorf("failed to write query for ptr `%v`: %w", t, err)
 		}
 	case reflect.Struct:
 
 		if v.IsValid() {
-			method := v.MethodByName("GetGraphQLWrapped")
+			method := v.MethodByName(wrapperMethodName)
 			if method.IsValid() {
 				wrapped := method.Call(nil)[0]
 				err := writeQuery(
@@ -459,7 +425,7 @@ func writeQuery(
 				continue
 			}
 
-			err := writeQuery(w, f.Type, FieldSafe(v, i), inlineField)
+			err := writeQuery(w, f.Type, reflectutil.FieldSafe(v, i), inlineField)
 			if err != nil {
 				return fmt.Errorf(
 					"failed to write query for struct field `%v`: %w",
@@ -473,7 +439,7 @@ func writeQuery(
 		}
 	case reflect.Slice:
 		if t.Elem().Kind() != reflect.Array {
-			err := writeQuery(w, t.Elem(), IndexSafe(v, 0), false)
+			err := writeQuery(w, t.Elem(), reflectutil.IndexSafe(v, 0), false)
 			if err != nil {
 				return fmt.Errorf(
 					"failed to write query for slice item `%v`: %w",
@@ -516,26 +482,10 @@ func writeQuery(
 	return nil
 }
 
-func IndexSafe(v reflect.Value, i int) reflect.Value {
-	if v.IsValid() && i < v.Len() {
-		return v.Index(i)
-	}
-	return reflect.ValueOf(nil)
-}
-
-func ElemSafe(v reflect.Value) reflect.Value {
-	if v.IsValid() {
-		return v.Elem()
-	}
-	return reflect.ValueOf(nil)
-}
-
-func FieldSafe(valStruct reflect.Value, i int) reflect.Value {
-	if valStruct.IsValid() {
-		return valStruct.Field(i)
-	}
-	return reflect.ValueOf(nil)
-}
+const (
+	// wrapperMethodName is the method name for wrapper type unwrapping
+	wrapperMethodName = "GetGraphQLWrapped"
+)
 
 var jsonUnmarshaler = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 var idType = reflect.TypeOf(ID(""))
@@ -543,14 +493,4 @@ var idType = reflect.TypeOf(ID(""))
 func isTrue(s string) bool {
 	b, _ := strconv.ParseBool(s)
 	return b
-}
-
-// isNillable returns true if the given kind can be nil
-func isNillable(kind reflect.Kind) bool {
-	switch kind {
-	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func:
-		return true
-	default:
-		return false
-	}
 }

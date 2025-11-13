@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
 	"strings"
 
 	"github.com/llehouerou/go-graphql-client/pkg/jsonutil"
@@ -120,11 +119,9 @@ func (c *Client) request(
 	variables any,
 	options ...Option,
 ) ([]byte, *http.Response, io.Reader, Errors) {
-	if variables != nil {
-		reflectVal := reflect.ValueOf(variables)
-		if reflectVal.Kind() == reflect.Map && reflectVal.Len() == 0 {
-			variables = nil
-		}
+	// Normalize empty variable maps to nil
+	if !hasVariables(variables) {
+		variables = nil
 	}
 	in := struct {
 		Query     string `json:"query"`

@@ -2013,3 +2013,80 @@ func TestWrapper_EmbeddedAnonymous(t *testing.T) {
 		}
 	})
 }
+
+func TestHasVariables(t *testing.T) {
+	tests := []struct {
+		name      string
+		variables any
+		want      bool
+	}{
+		{
+			name:      "nil variables",
+			variables: nil,
+			want:      false,
+		},
+		{
+			name:      "empty map",
+			variables: map[string]any{},
+			want:      false,
+		},
+		{
+			name: "non-empty map with one entry",
+			variables: map[string]any{
+				"id": "123",
+			},
+			want: true,
+		},
+		{
+			name: "non-empty map with multiple entries",
+			variables: map[string]any{
+				"id":   "123",
+				"name": "test",
+			},
+			want: true,
+		},
+		{
+			name: "struct variables",
+			variables: struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}{
+				ID:   "123",
+				Name: "test",
+			},
+			want: true,
+		},
+		{
+			name: "pointer to struct",
+			variables: &struct {
+				ID string `json:"id"`
+			}{
+				ID: "123",
+			},
+			want: true,
+		},
+		{
+			name:      "string (not a map)",
+			variables: "test",
+			want:      true,
+		},
+		{
+			name:      "int (not a map)",
+			variables: 42,
+			want:      true,
+		},
+		{
+			name:      "slice (not a map)",
+			variables: []string{"a", "b"},
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasVariables(tt.variables); got != tt.want {
+				t.Errorf("hasVariables() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

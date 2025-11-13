@@ -15,6 +15,14 @@ import (
 	"github.com/llehouerou/go-graphql-client/types"
 )
 
+const (
+	// wrapperMethodName is the name of the method that unwraps container types
+	wrapperMethodName = "GetGraphQLWrapped"
+
+	// wrapperFieldName is the required name of the field holding wrapped data
+	wrapperFieldName = "Value"
+)
+
 // UnmarshalGraphQL parses the JSON-encoded GraphQL response data and stores
 // the result in the GraphQL query data structure pointed to by v.
 //
@@ -207,12 +215,12 @@ func (d *decoder) decode() error {
 							fwrapper = fwrapper.Elem()
 						}
 						if fwrapper.IsValid() {
-							method := fwrapper.MethodByName("GetGraphQLWrapped")
+							method := fwrapper.MethodByName(wrapperMethodName)
 							if method.IsValid() {
 								// Wrapper type detected. Per convention, the wrapped data
 								// must be in a field named "Value". Unmarshal directly into
 								// the Value field, bypassing the wrapper.
-								wrapped := fwrapper.FieldByName("Value")
+								wrapped := fwrapper.FieldByName(wrapperFieldName)
 								if wrapped.IsValid() {
 									f = wrapped
 								}
@@ -310,9 +318,9 @@ func (d *decoder) decode() error {
 				// If so, unwrap to get the actual slice field per "Value" convention.
 				fwrapper := v
 				if fwrapper.IsValid() {
-					method := fwrapper.MethodByName("GetGraphQLWrapped")
+					method := fwrapper.MethodByName(wrapperMethodName)
 					if method.IsValid() {
-						wrapped := fwrapper.FieldByName("Value")
+						wrapped := fwrapper.FieldByName(wrapperFieldName)
 						if wrapped.IsValid() {
 							v = wrapped
 						}

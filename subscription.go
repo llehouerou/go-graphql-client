@@ -51,6 +51,14 @@ const (
 	GQL_INTERNAL OperationMessageType = "internal"
 )
 
+const (
+	// defaultReadLimit is the default maximum message size in bytes (10MB)
+	defaultReadLimit = 10 * 1024 * 1024
+
+	// retryInterval is the default delay between connection retry attempts
+	retryInterval = time.Second
+)
+
 // ErrSubscriptionStopped a special error which forces the subscription stop
 var ErrSubscriptionStopped = errors.New("subscription stopped")
 
@@ -115,7 +123,7 @@ func NewSubscriptionClient(url string) *SubscriptionClient {
 	return &SubscriptionClient{
 		url:           url,
 		timeout:       time.Minute,
-		readLimit:     10 * 1024 * 1024, // set default limit 10MB
+		readLimit:     defaultReadLimit,
 		subscriptions: make(map[string]*subscription),
 		createConn:    newWebsocketConn,
 		retryTimeout:  time.Minute,
@@ -271,7 +279,7 @@ func (sc *SubscriptionClient) init() error {
 			"client",
 			GQL_INTERNAL,
 		)
-		time.Sleep(time.Second)
+		time.Sleep(retryInterval)
 	}
 }
 
@@ -452,6 +460,77 @@ func (sc *SubscriptionClient) wrapHandler(
 	}
 }
 
+// handleDataOrErrorMessage processes GQL_DATA and GQL_ERROR messages
+func (sc *SubscriptionClient) handleDataOrErrorMessage(message OperationMessage) {
+	sc.printLog(message, "server", message.Type)
+
+	id, err := uuid.Parse(message.ID)
+	if err != nil {
+		return
+	}
+
+	sc.subscribersMu.Lock()
+	sub, ok := sc.subscriptions[id.String()]
+	sc.subscribersMu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	var out struct {
+		Data   *json.RawMessage
+		Errors Errors
+	}
+
+	err = json.Unmarshal(message.Payload, &out)
+	if err != nil {
+		go sub.handler(nil, err)
+		return
+	}
+	if len(out.Errors) > 0 {
+		go sub.handler(nil, out.Errors)
+		return
+	}
+
+	var outData []byte
+	if out.Data != nil && len(*out.Data) > 0 {
+		outData = *out.Data
+	}
+
+	go sub.handler(outData, nil)
+}
+
+// handleConnectionAckMessage processes GQL_CONNECTION_ACK messages
+func (sc *SubscriptionClient) handleConnectionAckMessage(message OperationMessage) {
+	sc.printLog(message, "server", GQL_CONNECTION_ACK)
+	if sc.onConnected != nil {
+		sc.onConnected()
+	}
+}
+
+// handleCompleteMessage processes GQL_COMPLETE messages
+func (sc *SubscriptionClient) handleCompleteMessage(message OperationMessage) {
+	sc.printLog(message, "server", GQL_COMPLETE)
+	_ = sc.Unsubscribe(message.ID)
+}
+
+// handleConnectionKeepAliveMessage processes GQL_CONNECTION_KEEP_ALIVE messages
+func (sc *SubscriptionClient) handleConnectionKeepAliveMessage(
+	message OperationMessage,
+) {
+	sc.printLog(message, "server", GQL_CONNECTION_KEEP_ALIVE)
+}
+
+// handleConnectionErrorMessage processes GQL_CONNECTION_ERROR messages
+func (sc *SubscriptionClient) handleConnectionErrorMessage(message OperationMessage) {
+	sc.printLog(message, "server", GQL_CONNECTION_ERROR)
+}
+
+// handleUnknownMessage processes unknown message types
+func (sc *SubscriptionClient) handleUnknownMessage(message OperationMessage) {
+	sc.printLog(message, "server", GQL_UNKNOWN)
+}
+
 // Run start websocket client and subscriptions. If this function is run with goroutine, it can be stopped after closed
 func (sc *SubscriptionClient) Run() error {
 	if err := sc.init(); err != nil {
@@ -516,58 +595,18 @@ func (sc *SubscriptionClient) Run() error {
 				}
 
 				switch message.Type {
-				case GQL_ERROR:
-					sc.printLog(message, "server", GQL_ERROR)
-					fallthrough
-				case GQL_DATA:
-					sc.printLog(message, "server", GQL_DATA)
-					id, err := uuid.Parse(message.ID)
-					if err != nil {
-						continue
-					}
-
-					sc.subscribersMu.Lock()
-					sub, ok := sc.subscriptions[id.String()]
-					sc.subscribersMu.Unlock()
-
-					if !ok {
-						continue
-					}
-					var out struct {
-						Data   *json.RawMessage
-						Errors Errors
-					}
-
-					err = json.Unmarshal(message.Payload, &out)
-					if err != nil {
-						go sub.handler(nil, err)
-						continue
-					}
-					if len(out.Errors) > 0 {
-						go sub.handler(nil, out.Errors)
-						continue
-					}
-
-					var outData []byte
-					if out.Data != nil && len(*out.Data) > 0 {
-						outData = *out.Data
-					}
-
-					go sub.handler(outData, nil)
-				case GQL_CONNECTION_ERROR:
-					sc.printLog(message, "server", GQL_CONNECTION_ERROR)
-				case GQL_COMPLETE:
-					sc.printLog(message, "server", GQL_COMPLETE)
-					_ = sc.Unsubscribe(message.ID)
-				case GQL_CONNECTION_KEEP_ALIVE:
-					sc.printLog(message, "server", GQL_CONNECTION_KEEP_ALIVE)
+				case GQL_ERROR, GQL_DATA:
+					sc.handleDataOrErrorMessage(message)
 				case GQL_CONNECTION_ACK:
-					sc.printLog(message, "server", GQL_CONNECTION_ACK)
-					if sc.onConnected != nil {
-						sc.onConnected()
-					}
+					sc.handleConnectionAckMessage(message)
+				case GQL_COMPLETE:
+					sc.handleCompleteMessage(message)
+				case GQL_CONNECTION_KEEP_ALIVE:
+					sc.handleConnectionKeepAliveMessage(message)
+				case GQL_CONNECTION_ERROR:
+					sc.handleConnectionErrorMessage(message)
 				default:
-					sc.printLog(message, "server", GQL_UNKNOWN)
+					sc.handleUnknownMessage(message)
 				}
 			}
 		}
