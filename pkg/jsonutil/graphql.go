@@ -228,6 +228,13 @@ func (d *decoder) decode() error {
 	return nil
 }
 
+// fieldInfo holds information about a field discovered during JSON object unmarshaling.
+type fieldInfo struct {
+	field         reflect.Value
+	isScalar      bool
+	fragmentMatch bool
+}
+
 // decodeObjectKey handles the processing of an object key and its value.
 // This is called when we're inside an object and see the next key.
 func (d *decoder) decodeObjectKey(
@@ -237,27 +244,52 @@ func (d *decoder) decodeObjectKey(
 	// Track current key for typename capture
 	d.currentKey = key
 
-	someFieldExist := false
-	// If one field is raw all must be treated as raw
-	rawMessage := false
-	isScalar := false
-
 	// First pass: find all fields and check if any matching fragment has it
-	type fieldInfo struct {
-		field         reflect.Value
-		isScalar      bool
-		fragmentMatch bool
+	fields, hasMatchingFragmentWithField, rawMessage := d.findFieldsForKey(
+		key,
+		rawMessageValue,
+	)
+
+	// Second pass: decide which fields to use and push to value stacks
+	someFieldExist, isScalar := d.selectAndPushFields(
+		fields,
+		hasMatchingFragmentWithField,
+	)
+
+	if !someFieldExist {
+		return nil, fmt.Errorf(
+			"struct field for %q doesn't exist in any of %v places to unmarshal",
+			key,
+			len(d.vs),
+		)
 	}
+
+	// Read the next token based on field type
+	return d.readNextToken(rawMessage, isScalar)
+}
+
+// findFieldsForKey discovers fields matching the given key across all value stacks.
+// It returns:
+// - fields: slice of fieldInfo (one per stack)
+// - hasMatchingFragmentWithField: whether any matching fragment has the field
+// - rawMessage: whether any field is of json.RawMessage type
+func (d *decoder) findFieldsForKey(
+	key string,
+	rawMessageValue reflect.Value,
+) ([]fieldInfo, bool, bool) {
 	fields := make([]fieldInfo, len(d.vs))
 	hasMatchingFragmentWithField := false
+	rawMessage := false
 
 	for i := range d.vs {
 		v := d.vs[i].Top()
 		for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 			v = v.Elem()
 		}
+
 		var f reflect.Value
 		var scalar bool
+
 		switch v.Kind() {
 		case reflect.Struct:
 			f, scalar = fieldByGraphQLName(v, key)
@@ -301,7 +333,16 @@ func (d *decoder) decodeObjectKey(
 		}
 	}
 
-	// Second pass: decide which fields to use
+	return fields, hasMatchingFragmentWithField, rawMessage
+}
+
+// selectAndPushFields processes discovered fields, filtering by fragment matching,
+// and pushes selected fields to the value stacks.
+// Returns (someFieldExist, isScalar) flags.
+func (d *decoder) selectAndPushFields(
+	fields []fieldInfo,
+	hasMatchingFragmentWithField bool,
+) (someFieldExist, isScalar bool) {
 	for i := range d.vs {
 		f := fields[i].field
 
@@ -322,34 +363,32 @@ func (d *decoder) decodeObjectKey(
 
 		d.vs[i] = append(d.vs[i], f)
 	}
-	if !someFieldExist {
-		return nil, fmt.Errorf(
-			"struct field for %q doesn't exist in any of %v places to unmarshal",
-			key,
-			len(d.vs),
-		)
-	}
 
-	var tok any
-	var err error
+	return someFieldExist, isScalar
+}
+
+// readNextToken reads the next JSON token based on whether the field is raw or scalar.
+// For raw/scalar fields, it decodes the entire value as json.RawMessage.
+// For regular fields, it returns the next token for further processing.
+func (d *decoder) readNextToken(rawMessage, isScalar bool) (any, error) {
 	if rawMessage || isScalar {
 		// Read the next complete object from the json stream
 		var data json.RawMessage
-		err = d.tokenizer.Decode(&data)
+		err := d.tokenizer.Decode(&data)
 		if err != nil {
 			return nil, err
 		}
-		tok = data
-	} else {
-		// We've just consumed the current token, which was the key.
-		// Read the next token, which should be the value,
-		// and let the rest of code process it.
-		tok, err = d.tokenizer.Token()
-		if err == io.EOF {
-			return nil, errors.New("unexpected end of JSON input")
-		} else if err != nil {
-			return nil, err
-		}
+		return data, nil
+	}
+
+	// We've just consumed the current token, which was the key.
+	// Read the next token, which should be the value,
+	// and let the rest of code process it.
+	tok, err := d.tokenizer.Token()
+	if err == io.EOF {
+		return nil, errors.New("unexpected end of JSON input")
+	} else if err != nil {
+		return nil, err
 	}
 
 	return tok, nil

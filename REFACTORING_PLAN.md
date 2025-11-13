@@ -1,202 +1,147 @@
-# Go GraphQL Client Refactoring Plan
+# Refactoring Plan - Code Organization & Maintainability
 
-## High Impact Changes
+This document outlines focused refactoring opportunities to improve code organization, readability, and maintainability across the go-graphql-client module.
 
-### 1. Centralize wrapper type and GraphQLType detection logic ✅
-**Location**: `query.go:487`, `pkg/jsonutil/graphql.go:19-23`
-- `wrapperMethodName` constant is defined in **two places**
-- Wrapper detection logic (`MethodByName(wrapperMethodName)`) duplicated in both files
-- `GraphqlTypeInterface` checks appear in 4+ locations
+## 1. Extract long method: `decodeObjectKey` in pkg/jsonutil/graphql.go
+**Impact: High** | **Complexity: Medium** | **Location:** pkg/jsonutil/graphql.go:231-356
 
-**Action**: Create `internal/reflectutil/graphql_types.go` with:
-- Constants: `WrapperMethodName`, `WrapperFieldName`
-- Functions: `IsWrapperType()`, `UnwrapValue()`, `ImplementsGraphQLType()`
-
-**Impact**: Eliminates duplication, single source of truth, easier to maintain wrapper convention.
+This 125-line method does too much. Extract into helper methods:
+- `findFieldsForKey(key string) []fieldInfo` - First pass: field discovery
+- `selectFieldsByFragment(fields []fieldInfo) []reflect.Value` - Second pass: fragment filtering
+- Core method reduces to ~40 lines, much more readable
 
 ---
 
-### 2. Decompose `writeQuery()` function (188 lines)
-**Location**: `query.go:295-483`
-- Single function handles: structs, slices, arrays, interfaces, pointers, ordered maps
-- Deeply nested switch/case with complex logic
-- Hard to test individual behaviors
+## 2. Extract struct variable handling from `queryArguments`
+**Impact: High** | **Complexity: Medium** | **Location:** query.go:138-221
 
-**Action**: Extract methods:
-- `writeStructQuery(w, t, v, inline)` - handles reflect.Struct case
-- `writeSliceQuery(w, t, v)` - handles reflect.Slice case
-- `writeOrderedMapQuery(w, v)` - handles [][2]any pattern
-- `writeInterfaceQuery(w, t, v, inline)` - handles reflect.Interface case
+The struct case is 64 lines within an 83-line function. Extract to:
+- `collectStructFieldsForArguments(typ, val) []fieldInfo` - Lines 166-204
+- `writeArgumentsFromFields(buf, fields)` - Lines 211-217
 
-**Impact**: Improves testability, readability, and reduces cognitive complexity.
+Makes the main function a simple dispatcher between map vs struct cases.
 
 ---
 
-### 3. Decompose `decode()` method (318 lines)
-**Location**: `pkg/jsonutil/graphql.go:160-479`
-- Main decoding loop handles objects, arrays, fragments, wrappers all in one method
-- Multiple levels of nesting (for loops within switch within for)
-- Most complex function in the codebase
+## 3. Consolidate pointer/interface unwrapping patterns
+**Impact: Medium** | **Complexity: Low** | **Files:** query.go, pkg/jsonutil/graphql.go
 
-**Action**: Extract methods:
-- `decodeObjectStart(d *decoder)` - handles '{' token
-- `decodeArrayStart(d *decoder)` - handles '[' token
-- `decodeObjectKey(d *decoder, key string)` - handles object key processing
-- `decodeValue(d *decoder, tok any)` - handles scalar values
-
-**Impact**: Dramatically improves readability and makes unit testing individual decode phases possible.
+Replace manual unwrapping loops throughout the codebase with the existing `reflectutil.UnwrapToConcreteValue()`. Found at:
+- query.go:256-258 (in writeStructQuery)
+- query.go:442-444 (in writeInterfaceQuery)
+- pkg/jsonutil/graphql.go:256-258, 364-366, 496-498, 596-599
 
 ---
 
-### 4. Centralize magic string constants
-**Location**: Throughout codebase
-- `"scalar"` tag - `query.go:424`, `pkg/jsonutil/graphql.go:600`
-- `"graphql"` tag name - used in 10+ places
-- `"__typename"` - `pkg/jsonutil/graphql.go:357`
-- `"Value"` field name - hardcoded as string
+## 4. Remove dead code: unused fragment filtering methods
+**Impact: Low** | **Complexity: Low** | **Location:** pkg/jsonutil/graphql.go:109-142
 
-**Action**: Create `types/constants.go`:
+Delete `shouldIncludeFragment` and `shouldIncludeFragmentByTag` (lines 109-142) marked with `//nolint:unused`. The filtering logic was refactored inline into `decodeObjectKey` and these are no longer called.
+
+---
+
+## 5. Extract field processing logic from `writeStructQuery`
+**Impact: High** | **Complexity: Medium** | **Location:** query.go:299-410
+
+The struct field loop (lines 337-405, 68 lines) is complex. Extract to:
+```go
+type fieldOutput struct {
+    shouldSkip bool
+    name string
+    isInline bool
+    value reflect.Value
+}
+
+func processStructField(f reflect.StructField, v reflect.Value) fieldOutput
+```
+
+---
+
+## 6. Deduplicate `isTrue()` helper function
+**Impact: Low** | **Complexity: Low** | **Files:** query.go:524, pkg/jsonutil/graphql.go:642
+
+Same function exists in both locations. Extract to `internal/reflectutil/helpers.go` or similar and import from both locations.
+
+---
+
+## 7. Split mixed const block separating operation types and error codes
+**Impact: Low** | **Complexity: Low** | **Location:** graphql.go:700-712
+
+Lines 700-712 mix operationType enum with error code strings. Split into two const blocks for clarity:
 ```go
 const (
-    GraphQLTag     = "graphql"
-    ScalarTag      = "scalar"
-    TypenameField  = "__typename"
-    FragmentPrefix = "..."
-    FragmentOnPrefix = "... on "
+    queryOperation operationType = iota
+    mutationOperation
+)
+
+const (
+    ErrRequestError  = "request_error"
+    ErrJsonEncode    = "json_encode_error"
+    // ...
 )
 ```
 
-**Impact**: Prevents typos, makes refactoring safer, improves code searchability.
-
 ---
 
-## Medium Impact Changes
+## 8. Consolidate error decoration logic in `withRequest`/`withResponse`
+**Impact: Medium** | **Complexity: Low** | **Location:** graphql.go:655-688
 
-### 5. Abstract error decoration pattern in Client
-**Location**: `graphql.go` - 9 `if c.debug` checks, 8 `withRequest/withResponse` calls
-- Repetitive pattern: create error → check debug → add context
-- Lines 151-154, 173-176, 203-206, 236-240, etc.
-
-**Action**: Create helper methods on Client:
+These methods (lines 655-688) are nearly identical. Extract common pattern:
 ```go
-func (c *Client) decorateError(err Error, req *http.Request, resp *http.Response, ...) Error
-func (c *Client) newRequestError(code string, err error, req, resp, ...) Error
+func (e Error) withDebugInfo(infoType string, headers http.Header, bodyReader io.Reader) Error
 ```
 
-**Impact**: Reduces boilerplate, ensures consistent error decoration, easier to modify debug behavior.
+Then implement both methods as thin wrappers.
 
 ---
 
-### 6. Improve GraphQL tag parsing
-**Location**: `pkg/jsonutil/graphql.go:632,657` - TODOs indicate current parsing is inadequate
-- Current: `strings.TrimSpace(value)` + basic `HasPrefix`/`Index` checks
-- Doesn't handle complex tags with multiple components properly
+## 9. Add helper for numeric kind checking in `writeArgumentType`
+**Impact: Low** | **Complexity: Low** | **Location:** query.go:265-266
 
-**Action**: Create `internal/tagparser` package with proper parser:
+Lines 265-266 list 10 numeric kinds that all map to "Int". Extract:
 ```go
-type ParsedTag struct {
-    FieldName  string
-    Arguments  string
-    Alias      string
-    IsFragment bool
-    TypeName   string // for fragments
-}
-
-func ParseGraphQLTag(tag string) (ParsedTag, error)
-```
-
-**Impact**: More robust tag handling, fixes edge cases, removes TODOs.
-
----
-
-### 7. Consolidate reflection utilities
-**Location**: `internal/reflectutil/safe.go` exists but underutilized
-- Add common patterns currently duplicated:
-  - Unwrapping pointers/interfaces (appears 20+ times)
-  - Nil checking for different kinds (appears 15+ times)
-  - Type interface checks
-
-**Action**: Extend `internal/reflectutil` with:
-```go
-func UnwrapToConcreteValue(v reflect.Value) reflect.Value
-func IsNilValue(v reflect.Value) bool
-func NewZeroOrPointerValue(t reflect.Type) reflect.Value
-```
-
-**Impact**: Reduces reflection complexity in main logic, centralizes tricky unsafe operations.
-
----
-
-### 8. Extract HTTP request building logic
-**Location**: `graphql.go:116-260` - `request()` method does too much
-- Builds JSON request body
-- Creates HTTP request
-- Executes request
-- Handles gzip
-- Decodes response
-- All error decoration
-
-**Action**: Split into:
-```go
-func (c *Client) buildRequest(ctx, query, variables) (*http.Request, error)
-func (c *Client) executeRequest(req) (*http.Response, io.Reader, error)
-func (c *Client) decodeResponse(resp, reader) ([]byte, Errors)
-```
-
-**Impact**: Better separation of concerns, easier to test HTTP logic independently.
-
----
-
-## Lower Impact (Nice to Have)
-
-### 9. Add structured types for error extensions
-**Location**: `graphql.go:376-382` - `Error.Extensions` is `map[string]any`
-- Internal extensions are also untyped maps
-- No type safety for common fields like "code", "request", "response"
-
-**Action**: Create typed extension structs:
-```go
-type ErrorExtensions struct {
-    Code     string
-    Internal *InternalExtensions
-    Custom   map[string]any
-}
-
-type InternalExtensions struct {
-    Request  *RequestInfo
-    Response *ResponseInfo
-    Error    error
+func isIntegerKind(k reflect.Kind) bool {
+    return k >= reflect.Int && k <= reflect.Uint64 && k != reflect.Uintptr
 }
 ```
 
-**Impact**: Improves type safety, better IDE autocomplete, self-documenting.
-
 ---
 
-### 10. Document immutable Client pattern
-**Location**: `graphql.go:351-367` - `WithRequestModifier` and `WithDebug`
-- These methods return NEW Client instances (immutable/functional pattern)
-- Not obvious from API, could surprise users expecting mutation
-- No clear "builder" pattern established
+## 10. Group related decoder stack operations into a helper struct
+**Impact: Medium** | **Complexity: High** | **Location:** pkg/jsonutil/graphql.go:70-97 and related methods
 
-**Action**: Add documentation and consider consistent API:
+The decoder manages 3 parallel slices (`vs`, `fragmentTypes`, and state). Encapsulate as:
 ```go
-// WithDebug returns a new Client with debug mode enabled.
-// The original Client is not modified (immutable pattern).
-func (c *Client) WithDebug(debug bool) *Client
-
-// Alternative: Add explicit NewClientBuilder() if builder pattern preferred
+type valueStack struct {
+    values []stack
+    fragmentTypes []string
+}
+// Methods: push, pop, filter, etc.
 ```
 
-**Impact**: Clearer API expectations, better developer experience, prevents confusion.
+Reduces cognitive load and prevents sync bugs between parallel slices.
 
 ---
 
-## Summary Statistics
-- **2 large functions** need decomposition (188 and 318 lines)
-- **2 constants** duplicated across packages
-- **9 debug checks** could be abstracted
-- **6 TODOs** could be addressed through these refactorings
-- **Magic strings** used in 30+ locations
+## Priority Recommendations
 
-These refactorings focus on **code organization** (extracting large functions), **eliminating duplication** (constants, reflection logic), and **improving maintainability** (centralized utilities, typed structures).
+### High Priority (biggest impact on maintainability)
+- #1: Extract decodeObjectKey
+- #2: Extract queryArguments struct handling
+- #5: Extract writeStructQuery field processing
+
+### Medium Priority (reduce duplication)
+- #3: Consolidate unwrapping patterns
+- #8: Consolidate error decoration
+
+### Low Priority (quick wins)
+- #4: Remove dead code
+- #6: Deduplicate isTrue
+- #7: Split const block
+
+---
+
+## Notes
+- All changes maintain backward compatibility
+- Focus on internal refactoring without API changes
+- Subscription code excluded as per requirements
