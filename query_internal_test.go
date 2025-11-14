@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // TestWriteArgumentsFromMap tests the writeArgumentsFromMap helper function
@@ -769,4 +770,41 @@ func TestConstructOperation_OptionError(t *testing.T) {
 	if !contains(err.Error(), "invalid query option type") {
 		t.Errorf("expected error about invalid option type, got: %v", err)
 	}
+}
+
+// TestIsScalarType tests the isScalarType helper function
+func TestIsScalarType(t *testing.T) {
+	t.Run("ID type is scalar", func(t *testing.T) {
+		if !isScalarType(reflect.TypeOf(ID(""))) {
+			t.Error("expected ID type to be scalar")
+		}
+	})
+
+	t.Run("string type is not scalar", func(t *testing.T) {
+		if isScalarType(reflect.TypeOf("")) {
+			t.Error("expected string type to not be scalar")
+		}
+	})
+
+	t.Run("int type is not scalar", func(t *testing.T) {
+		if isScalarType(reflect.TypeOf(0)) {
+			t.Error("expected int type to not be scalar")
+		}
+	})
+
+	t.Run("struct type is not scalar", func(t *testing.T) {
+		type TestStruct struct {
+			Field string
+		}
+		if isScalarType(reflect.TypeOf(TestStruct{})) {
+			t.Error("expected struct type to not be scalar")
+		}
+	})
+
+	t.Run("type implementing json.Unmarshaler is scalar", func(t *testing.T) {
+		// time.Time implements json.Unmarshaler
+		if !isScalarType(reflect.TypeOf(time.Time{})) {
+			t.Error("expected time.Time (json.Unmarshaler) to be scalar")
+		}
+	})
 }

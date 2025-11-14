@@ -2341,3 +2341,200 @@ func TestError_GetInternalExtensions(t *testing.T) {
 		}
 	})
 }
+
+// TestClient_MutateRaw tests MutateRaw with struct variables
+// Validates that MutateRaw returns raw bytes and properly serializes struct variables
+func TestClient_MutateRaw(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+		body := mustRead(req.Body)
+
+		// Parse and validate variables were serialized
+		var reqBody struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.Unmarshal([]byte(body), &reqBody); err != nil {
+			t.Fatalf("failed to unmarshal request body: %v", err)
+		}
+
+		// Validate struct variables were properly serialized
+		if got, want := reqBody.Variables["userId"], "789"; got != want {
+			t.Errorf("got userId: %v, want: %v", got, want)
+		}
+		if got, want := reqBody.Variables["name"], "Alice Wonder"; got != want {
+			t.Errorf("got name: %v, want: %v", got, want)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		mustWrite(
+			w,
+			`{"data":{"updateUser":{"id":"789","name":"Alice Wonder"}}}`,
+		)
+	})
+	client := graphql.NewClient(
+		"/graphql",
+		&http.Client{Transport: localRoundTripper{handler: mux}},
+	)
+
+	variables := struct {
+		UserID graphql.ID `json:"userId"`
+		Name   string     `json:"name"`
+	}{
+		UserID: graphql.ID("789"),
+		Name:   "Alice Wonder",
+	}
+
+	var m struct {
+		UpdateUser struct {
+			ID   graphql.ID
+			Name string
+		} `graphql:"updateUser(id: $userId, name: $name)"`
+	}
+
+	rawResp, err := client.MutateRaw(context.Background(), &m, variables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify we got raw bytes back
+	if len(rawResp) == 0 {
+		t.Fatal("expected non-empty raw response")
+	}
+
+	// Verify the raw response contains the expected JSON
+	if !strings.Contains(string(rawResp), "789") {
+		t.Errorf(
+			"expected raw response to contain '789', got: %s",
+			string(rawResp),
+		)
+	}
+	if !strings.Contains(string(rawResp), "Alice Wonder") {
+		t.Errorf(
+			"expected raw response to contain 'Alice Wonder', got: %s",
+			string(rawResp),
+		)
+	}
+}
+
+// TestClient_UnmarshalGraphQL tests the UnmarshalGraphQL wrapper function
+func TestClient_UnmarshalGraphQL(t *testing.T) {
+	data := []byte(`{"hero":{"name":"Luke Skywalker"}}`)
+
+	var result struct {
+		Hero struct {
+			Name string
+		}
+	}
+
+	err := graphql.UnmarshalGraphQL(data, &result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got, want := result.Hero.Name, "Luke Skywalker"; got != want {
+		t.Errorf("got Hero.Name: %v, want: %v", got, want)
+	}
+}
+
+// TestClient_ExecuteRequest tests the ExecuteRequest method
+func TestClient_ExecuteRequest(t *testing.T) {
+	t.Run("successful request", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			mustWrite(w, `{"data":{"test":"success"}}`)
+		})
+		client := graphql.NewClient(
+			"/graphql",
+			&http.Client{Transport: localRoundTripper{handler: mux}},
+		)
+
+		req, err := http.NewRequest("POST", "/graphql", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		resp, body, err := client.ExecuteRequest(req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("got status code: %d, want: %d", resp.StatusCode, http.StatusOK)
+		}
+
+		data, err := io.ReadAll(body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+
+		if !strings.Contains(string(data), "success") {
+			t.Errorf("expected body to contain 'success', got: %s", string(data))
+		}
+	})
+
+	t.Run("gzip compressed response", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "gzip")
+
+			gzWriter := gzip.NewWriter(w)
+			defer func() { _ = gzWriter.Close() }()
+
+			_, _ = gzWriter.Write([]byte(`{"data":{"test":"compressed"}}`))
+		})
+		client := graphql.NewClient(
+			"/graphql",
+			&http.Client{Transport: localRoundTripper{handler: mux}},
+		)
+
+		req, err := http.NewRequest("POST", "/graphql", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		resp, body, err := client.ExecuteRequest(req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		data, err := io.ReadAll(body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+
+		if !strings.Contains(string(data), "compressed") {
+			t.Errorf("expected body to contain 'compressed', got: %s", string(data))
+		}
+	})
+
+	t.Run("non-200 status code", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			mustWrite(w, `{"error":"internal error"}`)
+		})
+		client := graphql.NewClient(
+			"/graphql",
+			&http.Client{Transport: localRoundTripper{handler: mux}},
+		)
+
+		req, err := http.NewRequest("POST", "/graphql", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		_, _, err = client.ExecuteRequest(req)
+		if err == nil {
+			t.Fatal("expected error for non-200 status code, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "500") {
+			t.Errorf("expected error to mention status code 500, got: %v", err)
+		}
+	})
+}

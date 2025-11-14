@@ -328,8 +328,11 @@ func (sc *SubscriptionClient) sendConnectionInit() (err error) {
 }
 
 // Subscribe sends start message to server and open a channel to receive data.
-// The handler callback function will receive raw message data or error. If the call return error, onError event will be triggered
-// The function returns subscription ID and error. You can use subscription ID to unsubscribe the subscription
+// The handler callback function will receive raw message data or error. If the call return error, onError event will be triggered.
+// The function returns subscription ID and error. You can use subscription ID to unsubscribe the subscription.
+//
+// The variables parameter should be a map[string]any. While struct/pointer to struct is also supported,
+// passing any other type will cause a panic (programming error).
 func (sc *SubscriptionClient) Subscribe(
 	v any,
 	variables map[string]any,

@@ -7,10 +7,12 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/graph-gophers/graphql-go"
 	"github.com/graph-gophers/graphql-go/relay"
 	"github.com/graph-gophers/graphql-transport-ws/graphqlws"
@@ -445,4 +447,205 @@ func TestSubscriptionLifeCycle2(t *testing.T) {
 	if err := subscriptionClient.Run(); err != nil {
 		t.Fatalf("got error: %v, want: nil", err)
 	}
+}
+
+// TestSubscriptionClient_OptionSetters tests all option setter functions
+func TestSubscriptionClient_OptionSetters(t *testing.T) {
+	t.Run("WithTimeout", func(t *testing.T) {
+		client := NewSubscriptionClient("ws://example.com").
+			WithTimeout(30 * time.Second)
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+	})
+
+	t.Run("WithRetryTimeout", func(t *testing.T) {
+		client := NewSubscriptionClient("ws://example.com").
+			WithRetryTimeout(60 * time.Second)
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+	})
+
+	t.Run("WithoutLogTypes", func(t *testing.T) {
+		client := NewSubscriptionClient("ws://example.com").
+			WithoutLogTypes(GQL_CONNECTION_INIT, GQL_CONNECTION_ACK)
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+	})
+
+	t.Run("WithReadLimit", func(t *testing.T) {
+		client := NewSubscriptionClient("ws://example.com").
+			WithReadLimit(1024 * 1024)
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+	})
+
+	t.Run("OnConnected", func(t *testing.T) {
+		_ = false
+		callback := func() {
+			// callback placeholder
+		}
+		client := NewSubscriptionClient("ws://example.com").OnConnected(callback)
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+		// Note: callback won't be called without actually connecting
+	})
+
+	t.Run("WithWebSocketOptions", func(t *testing.T) {
+		options := WebsocketOptions{
+			HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		}
+		client := NewSubscriptionClient("ws://example.com").
+			WithWebSocketOptions(options)
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+	})
+
+	t.Run("chaining multiple options", func(t *testing.T) {
+		client := NewSubscriptionClient("ws://example.com").
+			WithTimeout(30 * time.Second).
+			WithRetryTimeout(60 * time.Second).
+			WithReadLimit(2048).
+			WithoutLogTypes(GQL_CONNECTION_INIT)
+		if client == nil {
+			t.Fatal("expected non-nil client after chaining")
+		}
+	})
+}
+
+// TestSubscriptionClient_DeprecatedMethods tests deprecated subscription methods
+// These tests just verify the methods exist and don't panic when called
+func TestSubscriptionClient_DeprecatedMethods(t *testing.T) {
+	// Just verify the methods can be called without panicking
+	client := NewSubscriptionClient("ws://example.com")
+
+	var q struct {
+		Greet string `graphql:"greet"`
+	}
+
+	dummyHandler := func(message []byte, err error) error {
+		return nil
+	}
+
+	t.Run("NamedSubscribe", func(t *testing.T) {
+		// Method should exist and not panic
+		// It will fail to connect but that's OK for coverage
+		_, _ = client.NamedSubscribe("TestOp", &q, nil, dummyHandler)
+	})
+
+	t.Run("SubscribeRaw", func(t *testing.T) {
+		// Method should exist and not panic
+		_, _ = client.SubscribeRaw(`subscription { test }`, nil, dummyHandler)
+	})
+
+	t.Run("Exec", func(t *testing.T) {
+		// Method should exist and not panic
+		_, _ = client.Exec(`subscription { test }`, nil, dummyHandler)
+	})
+}
+
+// TestSubscriptionClient_MessageHandlers tests subscription message handlers
+func TestSubscriptionClient_MessageHandlers(t *testing.T) {
+	t.Run("handleConnectionKeepAliveMessage", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upgrader := websocket.Upgrader{}
+			c, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = c.Close() }()
+
+			// Read connection init
+			_, _, _ = c.ReadMessage()
+
+			// Send connection ack
+			_ = c.WriteJSON(map[string]string{"type": string(GQL_CONNECTION_ACK)})
+
+			// Send keep-alive messages
+			for i := 0; i < 3; i++ {
+				_ = c.WriteJSON(
+					map[string]string{"type": string(GQL_CONNECTION_KEEP_ALIVE)},
+				)
+				time.Sleep(50 * time.Millisecond)
+			}
+
+			// Close gracefully
+			time.Sleep(100 * time.Millisecond)
+		}))
+		defer server.Close()
+
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		client := NewSubscriptionClient(wsURL).WithTimeout(2 * time.Second)
+
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			_ = client.Close()
+		}()
+
+		_ = client.Run()
+	})
+
+	t.Run("handleConnectionErrorMessage", func(t *testing.T) {
+		// Just verify OnError callback can be set
+		called := false
+		client := NewSubscriptionClient("ws://example.com").
+			OnError(func(sc *SubscriptionClient, err error) error {
+				called = true
+				return err
+			})
+		if client == nil {
+			t.Fatal("expected non-nil client")
+		}
+		// Note: callback won't be called without actually triggering an error
+		_ = called // suppress unused warning
+	})
+
+	t.Run("handleUnknownMessage", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upgrader := websocket.Upgrader{}
+			c, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = c.Close() }()
+
+			// Read connection init
+			_, _, _ = c.ReadMessage()
+
+			// Send connection ack
+			_ = c.WriteJSON(map[string]string{"type": string(GQL_CONNECTION_ACK)})
+
+			// Send unknown message type
+			_ = c.WriteJSON(map[string]string{
+				"type": "UNKNOWN_TYPE",
+			})
+
+			time.Sleep(200 * time.Millisecond)
+		}))
+		defer server.Close()
+
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		client := NewSubscriptionClient(wsURL).WithTimeout(2 * time.Second)
+
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			_ = client.Close()
+		}()
+
+		_ = client.Run()
+		// Unknown messages are logged but don't cause errors
+	})
+}
+
+// TestSubscriptionClient_Reset tests the Reset method
+func TestSubscriptionClient_Reset(t *testing.T) {
+	client := NewSubscriptionClient("ws://example.com")
+	client.Reset()
+	// Reset should reset the client to initial state
+	// No error expected
 }

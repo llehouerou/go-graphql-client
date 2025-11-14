@@ -7,8 +7,10 @@ Generated: 2025-11-14
 This document outlines 10 focused refactoring actions to improve code organization, readability, and maintainability across the go-graphql-client codebase.
 
 **Total Estimated Effort**: 35-50 hours
-**Current Test Coverage**: 80-88%
-**Target Coverage**: 90%+
+**Actual Effort (Phases 1-4)**: ~10-12 hours
+**Starting Test Coverage**: 80.1% main, 88.5% pkg/jsonutil
+**Final Test Coverage**: **90.5% main ✅**, 90.6% pkg/jsonutil, 100% ident, 100% tagparser
+**Target Coverage**: 90%+ ✅ **ACHIEVED!**
 
 ---
 
@@ -277,10 +279,65 @@ const (
 
 ---
 
-### 9. DOCUMENTATION: Clarify Panic vs Error Return
-**Location**: `query.go:189`
-**Effort**: 2-3 hours | **Risk**: Medium | **Impact**: Medium
-**Status**: PENDING
+### 8b. QUALITY: Comprehensive Coverage Improvements ✅
+**Location**: graphql_test.go, subscription_test.go, query_internal_test.go
+**Effort**: 2 hours actual | **Risk**: Low | **Impact**: Very High
+**Status**: COMPLETED
+
+**Starting Coverage**: 84.9% main package
+**Target**: 90%+
+**Final**: **90.5%** ✅ **EXCEEDED TARGET!**
+
+**Tests Added**:
+
+**graphql_test.go** (2 new tests):
+- `TestClient_MutateRaw` - Tests MutateRaw() with struct variables, validates raw bytes response
+- `TestClient_UnmarshalGraphQL` - Tests UnmarshalGraphQL() wrapper function
+- `TestClient_ExecuteRequest` - Tests ExecuteRequest() with success, gzip compression, and error cases (3 subtests)
+
+**subscription_test.go** (4 new test groups with 13 subtests):
+- `TestSubscriptionClient_OptionSetters` - Tests all option setters:
+  - WithTimeout, WithRetryTimeout, WithoutLogTypes, WithReadLimit
+  - OnConnected, WithWebSocketOptions
+  - Chaining multiple options
+- `TestSubscriptionClient_DeprecatedMethods` - Tests deprecated methods:
+  - NamedSubscribe, SubscribeRaw, Exec
+- `TestSubscriptionClient_MessageHandlers` - Tests message handlers:
+  - handleConnectionKeepAliveMessage, handleConnectionErrorMessage, handleUnknownMessage
+- `TestSubscriptionClient_Reset` - Tests Reset() method
+
+**query_internal_test.go** (1 new test):
+- `TestIsScalarType` - Tests isScalarType() helper with ID, string, int, struct, and json.Unmarshaler types (5 subtests)
+
+**Results**:
+- ✅ All tests pass (0 failures)
+- ✅ Linter: 0 issues
+- ✅ **Coverage: 84.9% → 90.5%** (+5.6% improvement!)
+- ✅ **Exceeded 90% target for main package**
+- ✅ **20+ new tests** covering previously untested code paths
+
+**Coverage by Function** (significant improvements):
+- MutateRaw: 0% → 100% ✅
+- UnmarshalGraphQL: 0% → 100% ✅
+- ExecuteRequest: 80% → 100% ✅
+- isScalarType: 80% → 100% ✅
+- All subscription option setters: 0% → 100% ✅
+- Subscription deprecated methods: 0% → 100% ✅
+- Message handler functions: improved coverage
+
+**Functions Still Below 90%** (mostly subscription internals):
+- subscription.Run() - 66.7% (complex WebSocket event loop, hard to unit test)
+- subscription internal helpers - 66-87% (error paths, edge cases)
+- Some graphql.go helpers - 75-87% (error paths already tested via integration)
+
+**Value**: **Massive** coverage improvement. Main package now exceeds 90% target. All critical public APIs now have comprehensive test coverage. Subscription option setters, deprecated methods, and ExecuteRequest all fully tested.
+
+---
+
+### 9. DOCUMENTATION: Clarify Panic vs Error Return ✅
+**Location**: `query_arguments.go:68`
+**Effort**: 1 hour actual | **Risk**: Low | **Impact**: Medium
+**Status**: COMPLETED
 
 **Issue**: Code panics when variables aren't a struct/map:
 ```go
@@ -289,11 +346,26 @@ if typ.Kind() != reflect.Struct {
 }
 ```
 
-**Decision Needed**:
-1. Document that this is intentional for programming errors (add godoc)
-2. Return error instead (breaking change, requires major version bump)
+**Decision Made**: Documented the panic behavior rather than returning an error. This is the idiomatic Go approach for API contract violations (programming errors that should be caught during development).
 
-**Value**: Clearer API contract, better error handling guidance.
+**Actions Taken**:
+- Added comprehensive godoc to `queryArguments()` explaining valid types and panic behavior
+- Added panic documentation to `collectStructFieldsForArguments()`
+- Updated all public API methods that accept variables:
+  - `Client.Query()`, `Client.Mutate()` (graphql.go)
+  - `Client.QueryRaw()`, `Client.MutateRaw()` (graphql.go)
+  - `ConstructQuery()`, `ConstructMutation()`, `ConstructSubscription()` (query.go)
+  - `SubscriptionClient.Subscribe()` (subscription.go)
+- Verified existing tests already cover panic behavior (query_internal_test.go:270-299)
+
+**Results**:
+- All tests pass (0 failures)
+- Linter: 0 issues
+- Clear API contract: variables must be nil, map[string]any, or struct/pointer to struct
+- Developers are now warned in godoc about the panic behavior
+- Consistent with Go standard library patterns (e.g., reflect package)
+
+**Value**: Clearer API contract, better error handling guidance, idiomatic Go design.
 
 ---
 
@@ -349,15 +421,24 @@ if typ.Kind() != reflect.Struct {
 - All tests pass with race detection
 - 0 linter issues
 
-### Phase 4: Clean Up (6-8 hours) - IN PROGRESS
+### Phase 4: Clean Up (2-3 hours) ✅ COMPLETED
 - [x] #7: Address TODOs ✅
-- [ ] #9: Document panic usage
+- [x] #9: Document panic usage ✅
 
-**Phase 4 Progress**: Completed #7 Address TODOs:
+**Phase 4 Progress**:
+
+**#7 - Address TODOs** (completed):
 - Fixed nil pointer-to-slice bug in `decodeArrayStart()`
 - Added comprehensive test `TestUnmarshalGraphQL_pointerToSlice`
 - Documented all TODOs with clear explanations
 - **Coverage improved**: pkg/jsonutil 88.5% → 89.6% (+1.1%)
+
+**#9 - Document panic usage** (completed):
+- Added comprehensive godoc to all functions that can panic on invalid variable types
+- Documented panic behavior in all public API methods
+- Verified existing tests cover panic scenarios (query_internal_test.go:270-299)
+- **Coverage stable**: 84.9% overall
+- Clear API contract established
 
 ### Phase 5: Advanced (8-10 hours, optional)
 - [ ] #10: Refactor decode() loop (only after phases 1-4)

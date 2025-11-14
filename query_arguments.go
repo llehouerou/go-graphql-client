@@ -19,6 +19,13 @@ type argumentFieldInfo struct {
 
 // queryArguments constructs a minified arguments string for variables.
 //
+// The variables parameter must be either:
+//   - A map[string]any, or
+//   - A struct (or pointer to struct) with json tags on exported fields
+//
+// This function will panic if variables is any other type (e.g., string, int, slice).
+// This panic is intentional and indicates a programming error - incorrect API usage.
+//
 // E.g., map[string]any{"a": int(123), "b": true} -> "$a:Int!$b:Boolean!".
 func queryArguments(variables any) string {
 	var buf bytes.Buffer
@@ -53,6 +60,10 @@ func writeArgumentsFromMap(buf *bytes.Buffer, variables map[string]any) {
 
 // collectStructFieldsForArguments extracts field information from a struct for use in GraphQL arguments.
 // It validates the struct, collects exported fields with json tags, and returns them sorted by json name.
+//
+// Panics if variables is not a struct or pointer to struct. This panic indicates a programming error
+// and should be caught during development. The variables parameter must be a struct type; use
+// map[string]any for non-struct variables.
 func collectStructFieldsForArguments(variables any) []argumentFieldInfo {
 	val := reflect.ValueOf(variables)
 	typ := reflect.TypeOf(variables)

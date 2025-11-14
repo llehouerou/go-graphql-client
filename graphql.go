@@ -60,6 +60,9 @@ func NewClient(url string, httpClient *http.Client) *Client {
 // Query executes a single GraphQL query request,
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
+//
+// The variables parameter must be either nil, a map[string]any, or a struct/pointer to struct
+// with json tags. Passing any other type will cause a panic (programming error).
 func (c *Client) Query(
 	ctx context.Context,
 	q any,
@@ -72,6 +75,9 @@ func (c *Client) Query(
 // Mutate executes a single GraphQL mutation request,
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
+//
+// The variables parameter must be either nil, a map[string]any, or a struct/pointer to struct
+// with json tags. Passing any other type will cause a panic (programming error).
 func (c *Client) Mutate(
 	ctx context.Context,
 	m any,
@@ -81,10 +87,13 @@ func (c *Client) Mutate(
 	return c.do(ctx, mutationOperation, m, variables, options...)
 }
 
-// Query executes a single GraphQL query request,
+// QueryRaw executes a single GraphQL query request,
 // with a query derived from q, populating the response into it.
 // q should be a pointer to struct that corresponds to the GraphQL schema.
-// return raw bytes message.
+// Returns raw bytes message.
+//
+// The variables parameter must be either nil, a map[string]any, or a struct/pointer to struct
+// with json tags. Passing any other type will cause a panic (programming error).
 func (c *Client) QueryRaw(
 	ctx context.Context,
 	q any,
@@ -97,7 +106,10 @@ func (c *Client) QueryRaw(
 // MutateRaw executes a single GraphQL mutation request,
 // with a mutation derived from m, populating the response into it.
 // m should be a pointer to struct that corresponds to the GraphQL schema.
-// return raw bytes message.
+// Returns raw bytes message.
+//
+// The variables parameter must be either nil, a map[string]any, or a struct/pointer to struct
+// with json tags. Passing any other type will cause a panic (programming error).
 func (c *Client) MutateRaw(
 	ctx context.Context,
 	m any,
