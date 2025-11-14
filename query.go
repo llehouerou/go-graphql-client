@@ -320,6 +320,82 @@ func query(v any) (string, error) {
 	return buf.String(), nil
 }
 
+// fieldOutput contains the processed information for a struct field
+// used during GraphQL query construction
+type fieldOutput struct {
+	shouldSkip bool
+	name       string
+	isInline   bool
+	value      reflect.Value
+	isScalar   bool
+}
+
+// processStructField processes a single struct field and returns
+// information needed for query construction
+func processStructField(
+	f reflect.StructField,
+	fieldValue reflect.Value,
+) fieldOutput {
+	value := ""
+	ok := false
+
+	// Check if the field type implements GraphQLType
+	if reflectutil.ImplementsGraphQLType(f.Type) {
+		// Only skip nil pointers and nil interfaces (not nil slices/maps)
+		kind := fieldValue.Kind()
+		if !fieldValue.IsValid() ||
+			((kind == reflect.Ptr || kind == reflect.Interface) &&
+				fieldValue.IsNil()) {
+			// Skip this field if it's a nil pointer or nil interface
+			return fieldOutput{shouldSkip: true}
+		}
+		typeName, typeok := reflectutil.GetGraphQLType(fieldValue, f.Type)
+		if typeok {
+			value = typeName
+			ok = true
+		} else {
+			// Skip this field if the concrete value is a nil pointer
+			return fieldOutput{shouldSkip: true}
+		}
+	} else if f.Type.Kind() == reflect.Slice &&
+		reflectutil.ImplementsGraphQLType(f.Type.Elem()) {
+		// For slices, check if the element type implements GraphQLType
+		typeName, typeok := reflectutil.GetGraphQLTypeFromType(f.Type.Elem())
+		if typeok {
+			value = typeName
+			ok = true
+		}
+	}
+
+	if !ok {
+		value, ok = f.Tag.Lookup(types.GraphQLTag)
+	}
+	// Skip this field if the tag value is hyphen
+	if value == "-" {
+		return fieldOutput{shouldSkip: true}
+	}
+
+	inlineField := f.Anonymous && !ok
+	var fieldName string
+	if !inlineField {
+		if ok {
+			fieldName = value
+		} else {
+			fieldName = ident.ParseMixedCaps(f.Name).ToLowerCamelCase()
+		}
+	}
+
+	isScalar := isTrue(f.Tag.Get(types.ScalarTag))
+
+	return fieldOutput{
+		shouldSkip: false,
+		name:       fieldName,
+		isInline:   inlineField,
+		value:      fieldValue,
+		isScalar:   isScalar,
+	}
+}
+
 // writeStructQuery writes a minified query for a struct type to w.
 // If inline is true, the struct fields are inlined into parent struct.
 func writeStructQuery(
@@ -361,64 +437,28 @@ func writeStructQuery(
 	iter := 0
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		value := ""
-		ok := false
+		fieldVal := reflectutil.FieldSafe(v, i)
+		output := processStructField(f, fieldVal)
 
-		// Check if the field type implements GraphQLType
-		if reflectutil.ImplementsGraphQLType(f.Type) {
-			fieldVal := v.Field(i)
-			// Only skip nil pointers and nil interfaces (not nil slices/maps)
-			kind := fieldVal.Kind()
-			if !fieldVal.IsValid() ||
-				((kind == reflect.Ptr || kind == reflect.Interface) &&
-					fieldVal.IsNil()) {
-				// Skip this field if it's a nil pointer or nil interface
-				continue
-			}
-			typeName, typeok := reflectutil.GetGraphQLType(fieldVal, f.Type)
-			if typeok {
-				value = typeName
-				ok = true
-			} else {
-				// Skip this field if the concrete value is a nil pointer
-				continue
-			}
-		} else if f.Type.Kind() == reflect.Slice &&
-			reflectutil.ImplementsGraphQLType(f.Type.Elem()) {
-			// For slices, check if the element type implements GraphQLType
-			typeName, typeok := reflectutil.GetGraphQLTypeFromType(f.Type.Elem())
-			if typeok {
-				value = typeName
-				ok = true
-			}
-		}
-
-		if !ok {
-			value, ok = f.Tag.Lookup(types.GraphQLTag)
-		}
-		// Skip this field if the tag value is hyphen
-		if value == "-" {
+		// Skip this field if indicated by processStructField
+		if output.shouldSkip {
 			continue
 		}
+
 		if iter != 0 {
 			_, _ = io.WriteString(w, ",")
 		}
 		iter++
 
-		inlineField := f.Anonymous && !ok
-		if !inlineField {
-			if ok {
-				_, _ = io.WriteString(w, value)
-			} else {
-				_, _ = io.WriteString(w, ident.ParseMixedCaps(f.Name).ToLowerCamelCase())
-			}
+		if !output.isInline {
+			_, _ = io.WriteString(w, output.name)
 		}
-		// Skip writeQuery if the GraphQL type associated with the filed is scalar
-		if isTrue(f.Tag.Get(types.ScalarTag)) {
+		// Skip writeQuery if the GraphQL type associated with the field is scalar
+		if output.isScalar {
 			continue
 		}
 
-		err := writeQuery(w, f.Type, reflectutil.FieldSafe(v, i), inlineField)
+		err := writeQuery(w, f.Type, fieldVal, output.isInline)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to write query for struct field `%v`: %w",

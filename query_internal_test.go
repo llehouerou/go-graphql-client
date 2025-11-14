@@ -391,3 +391,130 @@ func indexOf(s, substr string) int {
 	}
 	return -1
 }
+
+// TestProcessStructField tests the processStructField helper function
+func TestProcessStructField(t *testing.T) {
+	tests := []struct {
+		name       string
+		field      reflect.StructField
+		value      reflect.Value
+		wantSkip   bool
+		wantName   string
+		wantInline bool
+	}{
+		{
+			name: "simple field with no tag",
+			field: reflect.StructField{
+				Name: "UserName",
+				Type: reflect.TypeOf(""),
+			},
+			value:      reflect.ValueOf("test"),
+			wantSkip:   false,
+			wantName:   "userName",
+			wantInline: false,
+		},
+		{
+			name: "field with graphql tag",
+			field: reflect.StructField{
+				Name: "User",
+				Type: reflect.TypeOf(""),
+				Tag:  `graphql:"user(id: $userId)"`,
+			},
+			value:      reflect.ValueOf("test"),
+			wantSkip:   false,
+			wantName:   "user(id: $userId)",
+			wantInline: false,
+		},
+		{
+			name: "field with hyphen tag (should skip)",
+			field: reflect.StructField{
+				Name: "Internal",
+				Type: reflect.TypeOf(""),
+				Tag:  `graphql:"-"`,
+			},
+			value:      reflect.ValueOf("test"),
+			wantSkip:   true,
+			wantName:   "",
+			wantInline: false,
+		},
+		{
+			name: "anonymous field without tag (should inline)",
+			field: reflect.StructField{
+				Name:      "EmbeddedStruct",
+				Type:      reflect.TypeOf(struct{}{}),
+				Anonymous: true,
+			},
+			value:      reflect.ValueOf(struct{}{}),
+			wantSkip:   false,
+			wantName:   "",
+			wantInline: true,
+		},
+		{
+			name: "anonymous field with tag (should not inline)",
+			field: reflect.StructField{
+				Name:      "EmbeddedStruct",
+				Type:      reflect.TypeOf(struct{}{}),
+				Anonymous: true,
+				Tag:       `graphql:"... on IssueComment"`,
+			},
+			value:      reflect.ValueOf(struct{}{}),
+			wantSkip:   false,
+			wantName:   "... on IssueComment",
+			wantInline: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := processStructField(tt.field, tt.value)
+
+			if output.shouldSkip != tt.wantSkip {
+				t.Errorf("shouldSkip = %v, want %v", output.shouldSkip, tt.wantSkip)
+			}
+			if output.name != tt.wantName {
+				t.Errorf("name = %q, want %q", output.name, tt.wantName)
+			}
+			if output.isInline != tt.wantInline {
+				t.Errorf("isInline = %v, want %v", output.isInline, tt.wantInline)
+			}
+		})
+	}
+}
+
+// TestProcessStructField_scalar tests the scalar field handling specifically
+func TestProcessStructField_scalar(t *testing.T) {
+	t.Run("field with scalar tag", func(t *testing.T) {
+		field := reflect.StructField{
+			Name: "CustomDate",
+			Type: reflect.TypeOf(""),
+			Tag:  `graphql:"customDate" scalar:"true"`,
+		}
+		value := reflect.ValueOf("2024-01-01")
+
+		output := processStructField(field, value)
+
+		if !output.isScalar {
+			t.Errorf("expected isScalar to be true for field with scalar tag")
+		}
+		if output.shouldSkip {
+			t.Errorf("expected shouldSkip to be false")
+		}
+		if output.name != "customDate" {
+			t.Errorf("expected name to be 'customDate', got %q", output.name)
+		}
+	})
+
+	t.Run("field without scalar tag", func(t *testing.T) {
+		field := reflect.StructField{
+			Name: "NormalField",
+			Type: reflect.TypeOf(""),
+		}
+		value := reflect.ValueOf("test")
+
+		output := processStructField(field, value)
+
+		if output.isScalar {
+			t.Errorf("expected isScalar to be false for field without scalar tag")
+		}
+	})
+}
