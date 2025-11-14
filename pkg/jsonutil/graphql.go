@@ -106,41 +106,6 @@ func (s stack) Pop() stack {
 	return s[:len(s)-1]
 }
 
-// shouldIncludeFragment determines if a GraphQL fragment field should be included
-// based on the current typename. Returns true if:
-// - No typename is set (backward compatibility: include all fragments)
-// - The fragment's typename matches the current typename
-//
-//nolint:unused // Reserved for future use
-func (d *decoder) shouldIncludeFragment(
-	field reflect.StructField,
-) bool {
-	tag, ok := field.Tag.Lookup(types.GraphQLTag)
-	if !ok {
-		return true
-	}
-	return d.shouldIncludeFragmentByTag(tag)
-}
-
-// shouldIncludeFragmentByTag determines if a fragment with the given tag should be included.
-//
-//nolint:unused // Reserved for future use
-func (d *decoder) shouldIncludeFragmentByTag(
-	tag string,
-) bool {
-	// If no typename is set, include all fragments (backward compatibility)
-	if d.currentTypename == "" {
-		return true
-	}
-	// Extract the typename from the fragment tag
-	fragmentTypename := extractFragmentTypename(tag)
-	if fragmentTypename == "" {
-		return true // Not a fragment or malformed tag, include it
-	}
-	// Only include if the fragment typename matches the current typename
-	return fragmentTypename == d.currentTypename
-}
-
 // Decode decodes a single JSON value from d.tokenizer into v.
 func (d *decoder) Decode(v any) error {
 	rv := reflect.ValueOf(v)
