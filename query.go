@@ -7,7 +7,6 @@ import (
 	"io"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/llehouerou/go-graphql-client/ident"
@@ -385,7 +384,7 @@ func processStructField(
 		}
 	}
 
-	isScalar := isTrue(f.Tag.Get(types.ScalarTag))
+	isScalar := reflectutil.IsTrue(f.Tag.Get(types.ScalarTag))
 
 	return fieldOutput{
 		shouldSkip: false,
@@ -584,8 +583,3 @@ func writeQuery(
 
 var jsonUnmarshaler = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 var idType = reflect.TypeOf(ID(""))
-
-func isTrue(s string) bool {
-	b, _ := strconv.ParseBool(s)
-	return b
-}

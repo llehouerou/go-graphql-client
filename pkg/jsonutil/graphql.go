@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strconv"
 	"strings"
 
 	"github.com/llehouerou/go-graphql-client/internal/reflectutil"
@@ -634,12 +633,7 @@ func orderedMapValueByGraphQLName(v reflect.Value, name string) reflect.Value {
 }
 
 func hasScalarTag(f reflect.StructField) bool {
-	return isTrue(f.Tag.Get(types.ScalarTag))
-}
-
-func isTrue(s string) bool {
-	b, _ := strconv.ParseBool(s)
-	return b
+	return reflectutil.IsTrue(f.Tag.Get(types.ScalarTag))
 }
 
 // hasGraphQLName reports whether struct field f has GraphQL name.
