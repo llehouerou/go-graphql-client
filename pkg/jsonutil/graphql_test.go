@@ -1246,3 +1246,27 @@ func TestUnmarshalGraphQL_arrayWithInterfaceField(t *testing.T) {
 		t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
 	}
 }
+
+func TestUnmarshalGraphQL_templateSliceError(t *testing.T) {
+	// Test that providing a slice with >1 template items returns an error.
+	// Template slices should have either 0 items (use zero value) or 1 item (use as template).
+	type query struct {
+		Items []string
+	}
+
+	// Pre-initialize slice with 2 items (invalid - only 0 or 1 allowed)
+	got := query{
+		Items: []string{"template1", "template2"},
+	}
+
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"items": ["a", "b", "c"]
+	}`), &got)
+
+	if err == nil {
+		t.Fatal("got error: nil, want: non-nil")
+	}
+	if got, want := err.Error(), "template slice can only have 1 item, got 2"; got != want {
+		t.Errorf("got error: %q, want: %q", got, want)
+	}
+}

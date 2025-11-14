@@ -9,6 +9,12 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	// minInitialismLength is the minimum length of a valid initialism.
+	// Initialisms must be at least 2 characters long (e.g., "ID", "UI").
+	minInitialismLength = 2
+)
+
 // ParseMixedCaps parses a MixedCaps identifier name.
 //
 // E.g., "ClientMutationID" -> {"Client", "Mutation", "ID"}.
@@ -169,7 +175,7 @@ func isInitialism(word string) (string, bool) {
 // isTwoInitialisms reports whether word is two initialisms.
 func isTwoInitialisms(word string) (string, string, bool) {
 	word = strings.ToUpper(word)
-	for i := 2; i <= len(word)-2; i++ { // Shortest initialism is 2 characters long.
+	for i := minInitialismLength; i <= len(word)-minInitialismLength; i++ {
 		_, ok1 := initialisms[word[:i]]
 		_, ok2 := initialisms[word[i:]]
 		if ok1 && ok2 {

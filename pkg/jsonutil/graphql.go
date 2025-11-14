@@ -16,6 +16,12 @@ import (
 	"github.com/llehouerou/go-graphql-client/types"
 )
 
+const (
+	// maxTemplateSliceSize is the maximum number of items allowed in a template slice.
+	// Template slices should contain either 0 items (use zero value) or 1 item (use as template).
+	// Having more than 1 item is ambiguous and not supported.
+	maxTemplateSliceSize = 1
+)
 
 // UnmarshalGraphQL parses the JSON-encoded GraphQL response data and stores
 // the result in the GraphQL query data structure pointed to by v.
@@ -565,11 +571,17 @@ func (d *decoder) decodeArrayStart() error {
 			// if there is no template we need to create one so that we can
 			// handle both cases (with or without a template) in the same way
 			newSlice = reflect.Append(newSlice, reflect.Zero(v.Type().Elem()))
-		case 1:
+		case maxTemplateSliceSize:
 			// if there is a template, we need to keep it at index 0
 			newSlice = reflect.Append(newSlice, v.Index(0))
-		case 2:
-			return fmt.Errorf("template slice can only have 1 item, got %d", v.Len())
+		default:
+			if v.Len() > maxTemplateSliceSize {
+				return fmt.Errorf(
+					"template slice can only have %d item, got %d",
+					maxTemplateSliceSize,
+					v.Len(),
+				)
+			}
 		}
 		v.Set(newSlice)
 	}
