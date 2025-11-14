@@ -233,35 +233,19 @@ func (d *decoder) decode() error {
 
 		switch tok := tok.(type) {
 		case string, json.Number, bool, nil, json.RawMessage:
-			// Value.
+			// Scalar value.
 			err := d.decodeScalarValue(tok)
 			if err != nil {
 				return err
 			}
 
 		case json.Delim:
-			switch tok {
-			case '{':
-				// Start of object.
-				d.decodeObjectStart()
-			case '[':
-				// Start of array.
-				err := d.decodeArrayStart()
-				if err != nil {
-					return err
-				}
-			case '}':
-				// End of object.
-				d.vs.popAll()
-				d.popState()
-			case ']':
-				// End of array.
-				d.vs.popLeftArrayTemplates()
-				d.vs.popAll()
-				d.popState()
-			default:
-				return errors.New("unexpected delimiter in JSON input")
+			// Delimiter (object/array start or end).
+			err := d.handleDelimiter(tok)
+			if err != nil {
+				return err
 			}
+
 		default:
 			return errors.New("unexpected token in JSON input")
 		}
@@ -546,6 +530,45 @@ func (d *decoder) decodeObjectStart() {
 				}
 			}
 		}
+	}
+}
+
+// handleObjectEnd handles the end of a JSON object ('}' delimiter).
+// It pops all accumulated values and the object state from the stack.
+func (d *decoder) handleObjectEnd() {
+	d.vs.popAll()
+	d.popState()
+}
+
+// handleArrayEnd handles the end of a JSON array (']' delimiter).
+// It removes array templates and pops all accumulated values and the array state.
+func (d *decoder) handleArrayEnd() {
+	d.vs.popLeftArrayTemplates()
+	d.vs.popAll()
+	d.popState()
+}
+
+// handleDelimiter handles JSON delimiter tokens ('{', '[', '}', ']').
+// It dispatches to the appropriate handler based on the delimiter type.
+func (d *decoder) handleDelimiter(tok json.Delim) error {
+	switch tok {
+	case '{':
+		// Start of object.
+		d.decodeObjectStart()
+		return nil
+	case '[':
+		// Start of array.
+		return d.decodeArrayStart()
+	case '}':
+		// End of object.
+		d.handleObjectEnd()
+		return nil
+	case ']':
+		// End of array.
+		d.handleArrayEnd()
+		return nil
+	default:
+		return errors.New("unexpected delimiter in JSON input")
 	}
 }
 
