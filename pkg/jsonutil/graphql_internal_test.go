@@ -18,8 +18,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		}
 		target := testStruct{}
 		d := &decoder{
-			vs:            []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes: []string{""},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields, hasMatching, rawMsg := d.findFieldsForKey("name", rawMessageValue)
@@ -51,8 +53,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		}
 		target := testStruct{}
 		d := &decoder{
-			vs:            []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes: []string{""},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields, _, _ := d.findFieldsForKey("name", rawMessageValue)
@@ -68,8 +72,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		}
 		target := testStruct{}
 		d := &decoder{
-			vs:            []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes: []string{""},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields, _, _ := d.findFieldsForKey("data", rawMessageValue)
@@ -85,8 +91,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		}
 		target := testStruct{}
 		d := &decoder{
-			vs:            []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes: []string{""},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		_, _, rawMsg := d.findFieldsForKey("data", rawMessageValue)
@@ -106,8 +114,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		}
 		target := testStruct{}
 		d := &decoder{
-			vs:            []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes: []string{""},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields, _, _ := d.findFieldsForKey("wrapped", rawMessageValue)
@@ -124,8 +134,10 @@ func TestFindFieldsForKey(t *testing.T) {
 			{"age", new(int)},
 		}
 		d := &decoder{
-			vs:            []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes: []string{""},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields, _, _ := d.findFieldsForKey("name", rawMessageValue)
@@ -141,8 +153,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		}
 		target := testStruct{}
 		d := &decoder{
-			vs:              []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes:   []string{"User"},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{"User"},
+			},
 			currentTypename: "User",
 		}
 
@@ -162,8 +176,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		}
 		target := testStruct{}
 		d := &decoder{
-			vs:              []stack{{reflect.ValueOf(&target).Elem()}},
-			fragmentTypes:   []string{"User"},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{"User"},
+			},
 			currentTypename: "Admin",
 		}
 
@@ -187,11 +203,13 @@ func TestFindFieldsForKey(t *testing.T) {
 		target1 := struct1{}
 		target2 := struct2{}
 		d := &decoder{
-			vs: []stack{
-				{reflect.ValueOf(&target1).Elem()},
-				{reflect.ValueOf(&target2).Elem()},
+			vs: valueStack{
+				values: []stack{
+					{reflect.ValueOf(&target1).Elem()},
+					{reflect.ValueOf(&target2).Elem()},
+				},
+				fragmentTypes: []string{"", ""},
 			},
-			fragmentTypes: []string{"", ""},
 		}
 
 		fields, _, _ := d.findFieldsForKey("name", rawMessageValue)
@@ -217,8 +235,10 @@ func TestFindFieldsForKey(t *testing.T) {
 		targetPtr := &target
 		targetInterface := interface{}(targetPtr)
 		d := &decoder{
-			vs:            []stack{{reflect.ValueOf(&targetInterface).Elem()}},
-			fragmentTypes: []string{""},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&targetInterface).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields, _, _ := d.findFieldsForKey("name", rawMessageValue)
@@ -239,7 +259,10 @@ func TestSelectAndPushFields(t *testing.T) {
 		field := reflect.ValueOf(&target).Elem().Field(0)
 
 		d := &decoder{
-			vs: []stack{{reflect.ValueOf(&target).Elem()}},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields := []fieldInfo{
@@ -254,8 +277,8 @@ func TestSelectAndPushFields(t *testing.T) {
 		if isScalar {
 			t.Error("expected isScalar to be false")
 		}
-		if len(d.vs[0]) != 2 {
-			t.Errorf("expected stack length 2, got %d", len(d.vs[0]))
+		if len(d.vs.values[0]) != 2 {
+			t.Errorf("expected stack length 2, got %d", len(d.vs.values[0]))
 		}
 	})
 
@@ -267,7 +290,10 @@ func TestSelectAndPushFields(t *testing.T) {
 		field := reflect.ValueOf(&target).Elem().Field(0)
 
 		d := &decoder{
-			vs: []stack{{reflect.ValueOf(&target).Elem()}},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		fields := []fieldInfo{
@@ -289,7 +315,10 @@ func TestSelectAndPushFields(t *testing.T) {
 		field := reflect.ValueOf(&target).Elem().Field(0)
 
 		d := &decoder{
-			vs: []stack{{reflect.ValueOf(&target).Elem()}},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		// Field is from non-matching fragment, and a matching fragment also has this field
@@ -300,7 +329,7 @@ func TestSelectAndPushFields(t *testing.T) {
 		d.selectAndPushFields(fields, true)
 
 		// The field should be replaced with invalid value
-		pushedField := d.vs[0][1]
+		pushedField := d.vs.values[0][1]
 		if pushedField.IsValid() {
 			t.Error("expected invalid field when filtering non-matching fragment")
 		}
@@ -314,7 +343,10 @@ func TestSelectAndPushFields(t *testing.T) {
 		field := reflect.ValueOf(&target).Elem().Field(0)
 
 		d := &decoder{
-			vs: []stack{{reflect.ValueOf(&target).Elem()}},
+			vs: valueStack{
+				values:        []stack{{reflect.ValueOf(&target).Elem()}},
+				fragmentTypes: []string{""},
+			},
 		}
 
 		// Field is from non-matching fragment, but no matching fragment has this field
@@ -325,7 +357,7 @@ func TestSelectAndPushFields(t *testing.T) {
 		d.selectAndPushFields(fields, false)
 
 		// The field should be kept
-		pushedField := d.vs[0][1]
+		pushedField := d.vs.values[0][1]
 		if !pushedField.IsValid() {
 			t.Error("expected valid field when no matching fragment exists")
 		}
@@ -344,9 +376,12 @@ func TestSelectAndPushFields(t *testing.T) {
 		field2 := reflect.ValueOf(&target2).Elem().Field(0)
 
 		d := &decoder{
-			vs: []stack{
-				{reflect.ValueOf(&target1).Elem()},
-				{reflect.ValueOf(&target2).Elem()},
+			vs: valueStack{
+				values: []stack{
+					{reflect.ValueOf(&target1).Elem()},
+					{reflect.ValueOf(&target2).Elem()},
+				},
+				fragmentTypes: []string{"", ""},
 			},
 		}
 
@@ -357,18 +392,21 @@ func TestSelectAndPushFields(t *testing.T) {
 
 		d.selectAndPushFields(fields, false)
 
-		if len(d.vs[0]) != 2 {
-			t.Errorf("expected first stack length 2, got %d", len(d.vs[0]))
+		if len(d.vs.values[0]) != 2 {
+			t.Errorf("expected first stack length 2, got %d", len(d.vs.values[0]))
 		}
-		if len(d.vs[1]) != 2 {
-			t.Errorf("expected second stack length 2, got %d", len(d.vs[1]))
+		if len(d.vs.values[1]) != 2 {
+			t.Errorf("expected second stack length 2, got %d", len(d.vs.values[1]))
 		}
 	})
 
 	t.Run("returns false when no valid fields exist", func(t *testing.T) {
 		d := &decoder{
-			vs: []stack{
-				{reflect.Value{}},
+			vs: valueStack{
+				values: []stack{
+					{reflect.Value{}},
+				},
+				fragmentTypes: []string{""},
 			},
 		}
 

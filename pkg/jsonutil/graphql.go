@@ -75,17 +75,8 @@ type decoder struct {
 	// Stack of what part of input JSON we're in the middle of - objects, arrays.
 	parseState []json.Delim
 
-	// Stacks of values where to unmarshal.
-	// The top of each stack is the reflect.Value where to unmarshal next JSON value.
-	//
-	// The reason there's more than one stack is because we might be unmarshaling
-	// a single JSON value into multiple GraphQL fragments or embedded structs, so
-	// we keep track of them all.
-	vs []stack
-
-	// fragmentTypes tracks the typename for each stack in vs. Empty string means not a fragment
-	// or typename not applicable. This is used to filter inline fragments.
-	fragmentTypes []string
+	// vs manages stacks of values to unmarshal into, along with their fragment types.
+	vs valueStack
 
 	// currentTypename holds the __typename value for the current object being unmarshaled.
 	// This is used to filter inline fragments so only the matching fragment is populated.
@@ -105,14 +96,94 @@ func (s stack) Pop() stack {
 	return s[:len(s)-1]
 }
 
+// valueStack manages multiple parallel stacks of values to unmarshal into,
+// along with their associated fragment type names. This encapsulation prevents
+// sync bugs between the parallel slices.
+type valueStack struct {
+	// values holds multiple stacks of reflect.Values.
+	// Multiple stacks exist because we might unmarshal a single JSON value
+	// into multiple GraphQL fragments or embedded structs simultaneously.
+	values []stack
+
+	// fragmentTypes tracks the typename for each stack in values.
+	// Empty string means not a fragment or typename not applicable.
+	// This is used to filter inline fragments during unmarshaling.
+	fragmentTypes []string
+}
+
+// len returns the number of value stacks.
+func (vs *valueStack) len() int {
+	return len(vs.values)
+}
+
+// top returns the top value from the i-th stack.
+func (vs *valueStack) top(i int) reflect.Value {
+	return vs.values[i].Top()
+}
+
+// push appends a value to the i-th stack.
+func (vs *valueStack) push(i int, v reflect.Value) {
+	vs.values[i] = append(vs.values[i], v)
+}
+
+// addStack appends a new stack with the given initial value and fragment type.
+func (vs *valueStack) addStack(v reflect.Value, fragmentType string) {
+	vs.values = append(vs.values, []reflect.Value{v})
+	vs.fragmentTypes = append(vs.fragmentTypes, fragmentType)
+}
+
+// popAll pops from all stacks, keeping only non-empty ones.
+func (vs *valueStack) popAll() {
+	var nonEmpty []stack
+	var nonEmptyTypes []string
+	for i := range vs.values {
+		vs.values[i] = vs.values[i].Pop()
+		if len(vs.values[i]) > 0 {
+			nonEmpty = append(nonEmpty, vs.values[i])
+			// Keep fragment type in sync
+			if i < len(vs.fragmentTypes) {
+				nonEmptyTypes = append(nonEmptyTypes, vs.fragmentTypes[i])
+			} else {
+				nonEmptyTypes = append(nonEmptyTypes, "")
+			}
+		}
+	}
+	vs.values = nonEmpty
+	vs.fragmentTypes = nonEmptyTypes
+}
+
+// popLeftArrayTemplates removes the template element from all slice stacks.
+func (vs *valueStack) popLeftArrayTemplates() {
+	for i := range vs.values {
+		v := vs.values[i].Top()
+		// Unwrap pointers and interfaces to get to the actual slice
+		v = reflectutil.UnwrapToConcreteValue(v)
+
+		// Only call Slice if it's actually a slice type
+		if v.IsValid() && v.Kind() == reflect.Slice {
+			v.Set(v.Slice(1, v.Len()))
+		}
+	}
+}
+
+// fragmentType returns the fragment type for the i-th stack.
+func (vs *valueStack) fragmentType(i int) string {
+	if i < len(vs.fragmentTypes) {
+		return vs.fragmentTypes[i]
+	}
+	return ""
+}
+
 // Decode decodes a single JSON value from d.tokenizer into v.
 func (d *decoder) Decode(v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr {
 		return fmt.Errorf("cannot decode into non-pointer %T", v)
 	}
-	d.vs = []stack{{rv.Elem()}}
-	d.fragmentTypes = []string{""} // Root is not a fragment
+	d.vs = valueStack{
+		values:        []stack{{rv.Elem()}},
+		fragmentTypes: []string{""}, // Root is not a fragment
+	}
 	return d.decode()
 }
 
@@ -122,7 +193,7 @@ func (d *decoder) decode() error {
 
 	// The loop invariant is that the top of each d.vs stack
 	// is where we try to unmarshal the next JSON value we see.
-	for len(d.vs) > 0 {
+	for d.vs.len() > 0 {
 		var tok any
 		tok, err := d.tokenizer.Token()
 
@@ -175,12 +246,12 @@ func (d *decoder) decode() error {
 				}
 			case '}':
 				// End of object.
-				d.popAllVs()
+				d.vs.popAll()
 				d.popState()
 			case ']':
 				// End of array.
-				d.popLeftArrayTemplates()
-				d.popAllVs()
+				d.vs.popLeftArrayTemplates()
+				d.vs.popAll()
 				d.popState()
 			default:
 				return errors.New("unexpected delimiter in JSON input")
@@ -224,7 +295,7 @@ func (d *decoder) decodeObjectKey(
 		return nil, fmt.Errorf(
 			"struct field for %q doesn't exist in any of %v places to unmarshal",
 			key,
-			len(d.vs),
+			d.vs.len(),
 		)
 	}
 
@@ -241,12 +312,12 @@ func (d *decoder) findFieldsForKey(
 	key string,
 	rawMessageValue reflect.Value,
 ) ([]fieldInfo, bool, bool) {
-	fields := make([]fieldInfo, len(d.vs))
+	fields := make([]fieldInfo, d.vs.len())
 	hasMatchingFragmentWithField := false
 	rawMessage := false
 
-	for i := range d.vs {
-		v := d.vs[i].Top()
+	for i := 0; i < d.vs.len(); i++ {
+		v := d.vs.top(i)
 		v = reflectutil.UnwrapToConcreteValue(v)
 
 		var f reflect.Value
@@ -279,9 +350,9 @@ func (d *decoder) findFieldsForKey(
 		}
 
 		fragmentMatch := true
-		if i < len(d.fragmentTypes) && d.fragmentTypes[i] != "" &&
-			d.currentTypename != "" {
-			fragmentMatch = d.fragmentTypes[i] == d.currentTypename
+		fragType := d.vs.fragmentType(i)
+		if fragType != "" && d.currentTypename != "" {
+			fragmentMatch = fragType == d.currentTypename
 		}
 
 		fields[i] = fieldInfo{
@@ -305,7 +376,7 @@ func (d *decoder) selectAndPushFields(
 	fields []fieldInfo,
 	hasMatchingFragmentWithField bool,
 ) (someFieldExist, isScalar bool) {
-	for i := range d.vs {
+	for i := 0; i < d.vs.len(); i++ {
 		f := fields[i].field
 
 		if f.IsValid() {
@@ -323,7 +394,7 @@ func (d *decoder) selectAndPushFields(
 			f = reflect.Value{}
 		}
 
-		d.vs[i] = append(d.vs[i], f)
+		d.vs.push(i, f)
 	}
 
 	return someFieldExist, isScalar
@@ -360,8 +431,8 @@ func (d *decoder) readNextToken(rawMessage, isScalar bool) (any, error) {
 // to slices in the decoder's value stack.
 func (d *decoder) decodeArrayValue() error {
 	someSliceExist := false
-	for i := range d.vs {
-		v := d.vs[i].Top()
+	for i := 0; i < d.vs.len(); i++ {
+		v := d.vs.top(i)
 		v = reflectutil.UnwrapToConcreteValue(v)
 
 		// Check if this is a wrapper type (has GetGraphQLWrapped method).
@@ -385,12 +456,12 @@ func (d *decoder) decodeArrayValue() error {
 			f = v.Index(v.Len() - 1)
 			someSliceExist = true
 		}
-		d.vs[i] = append(d.vs[i], f)
+		d.vs.push(i, f)
 	}
 	if !someSliceExist {
 		return fmt.Errorf(
 			"slice doesn't exist in any of %v places to unmarshal",
-			len(d.vs),
+			d.vs.len(),
 		)
 	}
 	return nil
@@ -406,8 +477,8 @@ func (d *decoder) decodeScalarValue(tok any) error {
 		}
 	}
 
-	for i := range d.vs {
-		v := d.vs[i].Top()
+	for i := 0; i < d.vs.len(); i++ {
+		v := d.vs.top(i)
 		if !v.IsValid() {
 			continue
 		}
@@ -416,7 +487,7 @@ func (d *decoder) decodeScalarValue(tok any) error {
 			return err
 		}
 	}
-	d.popAllVs()
+	d.vs.popAll()
 	return nil
 }
 
@@ -425,9 +496,9 @@ func (d *decoder) decodeScalarValue(tok any) error {
 func (d *decoder) decodeObjectStart() {
 	d.pushState('{')
 
-	frontier := make([]reflect.Value, len(d.vs))
-	for i := range d.vs {
-		v := d.vs[i].Top()
+	frontier := make([]reflect.Value, d.vs.len())
+	for i := 0; i < d.vs.len(); i++ {
+		v := d.vs.top(i)
 		frontier[i] = v
 		// TODO: Do this recursively or not? Add a test case if needed.
 		if v.Kind() == reflect.Ptr && v.IsNil() {
@@ -446,17 +517,12 @@ func (d *decoder) decodeObjectStart() {
 				field := v.Type().Field(i)
 				if isGraphQLFragment(field) {
 					// Add GraphQL fragment and track its typename
-					d.vs = append(d.vs, []reflect.Value{v.Field(i)})
 					tag, _ := field.Tag.Lookup(types.GraphQLTag)
-					d.fragmentTypes = append(
-						d.fragmentTypes,
-						extractFragmentTypename(tag),
-					)
+					d.vs.addStack(v.Field(i), extractFragmentTypename(tag))
 					frontier = append(frontier, v.Field(i))
 				} else if field.Anonymous {
 					// Add embedded struct (not a fragment)
-					d.vs = append(d.vs, []reflect.Value{v.Field(i)})
-					d.fragmentTypes = append(d.fragmentTypes, "")
+					d.vs.addStack(v.Field(i), "")
 					frontier = append(frontier, v.Field(i))
 				}
 			}
@@ -467,11 +533,7 @@ func (d *decoder) decodeObjectStart() {
 				keyStr := key.Interface().(string)
 				if keyForGraphQLFragment(keyStr) {
 					// Add GraphQL fragment and track its typename
-					d.vs = append(d.vs, []reflect.Value{val})
-					d.fragmentTypes = append(
-						d.fragmentTypes,
-						extractFragmentTypename(keyStr),
-					)
+					d.vs.addStack(val, extractFragmentTypename(keyStr))
 					frontier = append(frontier, val)
 				}
 			}
@@ -484,8 +546,8 @@ func (d *decoder) decodeObjectStart() {
 func (d *decoder) decodeArrayStart() error {
 	d.pushState('[')
 
-	for i := range d.vs {
-		v := d.vs[i].Top()
+	for i := 0; i < d.vs.len(); i++ {
+		v := d.vs.top(i)
 		// TODO: Confirm this is needed, write a test case.
 		//if v.Kind() == reflect.Ptr && v.IsNil() {
 		//	v.Set(reflect.New(v.Type().Elem())) // v = new(T).
@@ -565,40 +627,6 @@ func (d *decoder) state() json.Delim {
 		return 0
 	}
 	return d.parseState[len(d.parseState)-1]
-}
-
-// popAllVs pops from all d.vs stacks, keeping only non-empty ones.
-func (d *decoder) popAllVs() {
-	var nonEmpty []stack
-	var nonEmptyTypes []string
-	for i := range d.vs {
-		d.vs[i] = d.vs[i].Pop()
-		if len(d.vs[i]) > 0 {
-			nonEmpty = append(nonEmpty, d.vs[i])
-			// Keep fragment type in sync, using empty string if index out of bounds
-			if i < len(d.fragmentTypes) {
-				nonEmptyTypes = append(nonEmptyTypes, d.fragmentTypes[i])
-			} else {
-				nonEmptyTypes = append(nonEmptyTypes, "")
-			}
-		}
-	}
-	d.vs = nonEmpty
-	d.fragmentTypes = nonEmptyTypes
-}
-
-// popLeftArrayTemplates pops left from last array items of all d.vs stacks.
-func (d *decoder) popLeftArrayTemplates() {
-	for i := range d.vs {
-		v := d.vs[i].Top()
-		// Unwrap pointers and interfaces to get to the actual slice
-		v = reflectutil.UnwrapToConcreteValue(v)
-
-		// Only call Slice if it's actually a slice type
-		if v.IsValid() && v.Kind() == reflect.Slice {
-			v.Set(v.Slice(1, v.Len()))
-		}
-	}
 }
 
 // fieldByGraphQLName returns an exported struct field of struct v
