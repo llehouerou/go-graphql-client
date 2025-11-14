@@ -1370,6 +1370,334 @@ func TestUnmarshalGraphQL_mapTemplateError(t *testing.T) {
 	}
 }
 
+func TestUnmarshalGraphQL_fragmentTypeEdgeCase(t *testing.T) {
+	// Tests fragmentType() accessing index beyond fragmentTypes slice length
+	type query struct {
+		User struct {
+			Login string
+			Node  struct {
+				Typename string `graphql:"__typename"`
+				Droid    struct {
+					PrimaryFunction string
+				} `graphql:"... on Droid"`
+				Human struct {
+					Height float64
+				} `graphql:"... on Human"`
+			}
+		}
+	}
+
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"user": {
+			"login": "test",
+			"node": {
+				"__typename": "Droid",
+				"primaryFunction": "Protocol"
+			}
+		}
+	}`), &got)
+
+	if err != nil {
+		t.Fatalf("got error: %v, want: nil", err)
+	}
+
+	if got.User.Login != "test" {
+		t.Errorf("got: %q, want: %q", got.User.Login, "test")
+	}
+
+	if got.User.Node.Typename != "Droid" {
+		t.Errorf("got: %q, want: %q", got.User.Node.Typename, "Droid")
+	}
+
+	if got.User.Node.Droid.PrimaryFunction != "Protocol" {
+		t.Errorf("got: %q, want: %q", got.User.Node.Droid.PrimaryFunction, "Protocol")
+	}
+
+	// Human fragment should be empty
+	if got.User.Node.Human.Height != 0 {
+		t.Errorf("got: %f, want: 0", got.User.Node.Human.Height)
+	}
+}
+
+func TestUnmarshalGraphQL_extractFragmentTypenameInvalid(t *testing.T) {
+	// Tests extractFragmentTypename() with invalid/non-fragment tags
+	type query struct {
+		User struct {
+			// This is NOT a fragment tag - just a regular field with arguments
+			Login string `graphql:"login(name: $name)"`
+		}
+	}
+
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"user": {
+			"login": "test"
+		}
+	}`), &got)
+
+	if err != nil {
+		t.Fatalf("got error: %v, want: nil", err)
+	}
+
+	if got.User.Login != "test" {
+		t.Errorf("got: %q, want: %q", got.User.Login, "test")
+	}
+}
+
+func TestUnmarshalGraphQL_fragmentWithNonMatchingTypename(t *testing.T) {
+	// Tests fragment filtering when __typename doesn't match any fragments
+	// but extra fields that don't match fragments are ignored
+	type query struct {
+		Node struct {
+			Typename string `graphql:"__typename"`
+			User     struct {
+				Name string
+			} `graphql:"... on User"`
+			Bot struct {
+				ID string
+			} `graphql:"... on Bot"`
+		}
+	}
+
+	var got query
+	// __typename is "Admin" which doesn't match User or Bot fragments
+	// Only __typename field is present (no fragment-specific fields)
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"node": {
+			"__typename": "Admin"
+		}
+	}`), &got)
+
+	if err != nil {
+		t.Fatalf("got error: %v, want: nil", err)
+	}
+
+	if got.Node.Typename != "Admin" {
+		t.Errorf("got: %q, want: %q", got.Node.Typename, "Admin")
+	}
+
+	// Both fragments should be zero-valued since typename doesn't match
+	if got.Node.User.Name != "" {
+		t.Errorf("got: %q, want: empty string", got.Node.User.Name)
+	}
+
+	if got.Node.Bot.ID != "" {
+		t.Errorf("got: %q, want: empty string", got.Node.Bot.ID)
+	}
+}
+
+func TestUnmarshalGraphQL_nestedFragmentsWithTypename(t *testing.T) {
+	// Tests deeply nested fragments with __typename at multiple levels
+	type query struct {
+		Repository struct {
+			Issue struct {
+				Author struct {
+					Typename string `graphql:"__typename"`
+					User     struct {
+						Name string
+					} `graphql:"... on User"`
+					Bot struct {
+						ID string
+					} `graphql:"... on Bot"`
+				}
+			}
+		}
+	}
+
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"repository": {
+			"issue": {
+				"author": {
+					"__typename": "Bot",
+					"id": "bot123"
+				}
+			}
+		}
+	}`), &got)
+
+	if err != nil {
+		t.Fatalf("got error: %v, want: nil", err)
+	}
+
+	if got.Repository.Issue.Author.Typename != "Bot" {
+		t.Errorf("got: %q, want: %q", got.Repository.Issue.Author.Typename, "Bot")
+	}
+
+	if got.Repository.Issue.Author.Bot.ID != "bot123" {
+		t.Errorf("got: %q, want: %q", got.Repository.Issue.Author.Bot.ID, "bot123")
+	}
+
+	// User fragment should be empty since __typename was Bot
+	if got.Repository.Issue.Author.User.Name != "" {
+		t.Errorf("got: %q, want: empty string", got.Repository.Issue.Author.User.Name)
+	}
+}
+
+func TestUnmarshalGraphQL_orderedMapWithMultipleFragments(t *testing.T) {
+	// Tests ordered map ([][2]any) with multiple entries (not fragments)
+	// This tests the ordered map copy functionality
+	type User struct {
+		Name string
+		ID   string
+	}
+
+	type query struct {
+		Users [][2]any
+	}
+
+	got := query{
+		Users: [][2]any{
+			{"user1", &User{}},
+			{"user2", &User{}},
+		},
+	}
+
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"users": {
+			"user1": {"name": "alice", "id": "1"},
+			"user2": {"name": "bob", "id": "2"}
+		}
+	}`), &got)
+
+	if err != nil {
+		t.Fatalf("got error: %v, want: nil", err)
+	}
+
+	// Check that both entries were populated
+	user1, ok := got.Users[0][1].(*User)
+	if !ok {
+		t.Fatalf("got type: %T, want: *User", got.Users[0][1])
+	}
+
+	if user1.Name != "alice" || user1.ID != "1" {
+		t.Errorf("got: %+v, want: {Name:alice ID:1}", user1)
+	}
+
+	user2, ok := got.Users[1][1].(*User)
+	if !ok {
+		t.Fatalf("got type: %T, want: *User", got.Users[1][1])
+	}
+
+	if user2.Name != "bob" || user2.ID != "2" {
+		t.Errorf("got: %+v, want: {Name:bob ID:2}", user2)
+	}
+}
+
+func TestUnmarshalGraphQL_recursiveStructWithFragments(t *testing.T) {
+	// Tests recursive struct handling with fragments
+	type Node struct {
+		ID       string
+		Parent   *Node
+		Children []*Node
+		Metadata struct {
+			Typename string `graphql:"__typename"`
+			User     struct {
+				Name string
+			} `graphql:"... on UserMetadata"`
+			System struct {
+				Version string
+			} `graphql:"... on SystemMetadata"`
+		}
+	}
+
+	type query struct {
+		Node Node
+	}
+
+	var got query
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"node": {
+			"id": "1",
+			"parent": {
+				"id": "0",
+				"parent": null,
+				"children": [],
+				"metadata": {
+					"__typename": "SystemMetadata",
+					"version": "1.0"
+				}
+			},
+			"children": [
+				{
+					"id": "2",
+					"parent": null,
+					"children": [],
+					"metadata": {
+						"__typename": "UserMetadata",
+						"name": "child"
+					}
+				}
+			],
+			"metadata": {
+				"__typename": "UserMetadata",
+				"name": "root"
+			}
+		}
+	}`), &got)
+
+	if err != nil {
+		t.Fatalf("got error: %v, want: nil", err)
+	}
+
+	if got.Node.ID != "1" {
+		t.Errorf("got: %q, want: %q", got.Node.ID, "1")
+	}
+
+	if got.Node.Parent == nil {
+		t.Fatal("got: nil, want: non-nil parent")
+	}
+
+	if got.Node.Parent.ID != "0" {
+		t.Errorf("got: %q, want: %q", got.Node.Parent.ID, "0")
+	}
+
+	if got.Node.Parent.Metadata.Typename != "SystemMetadata" {
+		t.Errorf(
+			"got: %q, want: %q",
+			got.Node.Parent.Metadata.Typename,
+			"SystemMetadata",
+		)
+	}
+
+	if got.Node.Parent.Metadata.System.Version != "1.0" {
+		t.Errorf(
+			"got: %q, want: %q",
+			got.Node.Parent.Metadata.System.Version,
+			"1.0",
+		)
+	}
+
+	if got.Node.Metadata.Typename != "UserMetadata" {
+		t.Errorf("got: %q, want: %q", got.Node.Metadata.Typename, "UserMetadata")
+	}
+
+	if got.Node.Metadata.User.Name != "root" {
+		t.Errorf("got: %q, want: %q", got.Node.Metadata.User.Name, "root")
+	}
+
+	if len(got.Node.Children) != 1 {
+		t.Fatalf("got: %d children, want: 1", len(got.Node.Children))
+	}
+
+	if got.Node.Children[0].Metadata.Typename != "UserMetadata" {
+		t.Errorf(
+			"got: %q, want: %q",
+			got.Node.Children[0].Metadata.Typename,
+			"UserMetadata",
+		)
+	}
+
+	if got.Node.Children[0].Metadata.User.Name != "child" {
+		t.Errorf(
+			"got: %q, want: %q",
+			got.Node.Children[0].Metadata.User.Name,
+			"child",
+		)
+	}
+}
+
 // stringContains checks if s contains substr.
 func stringContains(s, substr string) bool {
 	return len(s) >= len(substr) && indexOf(s, substr) >= 0

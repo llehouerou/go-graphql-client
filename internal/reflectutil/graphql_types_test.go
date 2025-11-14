@@ -423,3 +423,107 @@ func TestGetGraphQLTypeFromType(t *testing.T) {
 		})
 	}
 }
+
+// Nested wrapper for testing deep unwrapping
+type NestedWrapper struct {
+	Value TestWrapper[string]
+}
+
+func (w NestedWrapper) GetGraphQLWrapped() TestWrapper[string] {
+	return w.Value
+}
+
+func TestUnwrapValue_deeplyNested(t *testing.T) {
+	// Test deeply nested wrappers
+	innerWrapper := TestWrapper[string]{Value: "deep"}
+	outerWrapper := NestedWrapper{Value: innerWrapper}
+
+	result := UnwrapValue(reflect.ValueOf(outerWrapper))
+	if !result.IsValid() {
+		t.Fatal("UnwrapValue returned invalid value for nested wrapper")
+	}
+
+	// Result should be the inner TestWrapper[string]
+	innerResult, ok := result.Interface().(TestWrapper[string])
+	if !ok {
+		t.Fatalf("got type: %T, want: TestWrapper[string]", result.Interface())
+	}
+
+	if innerResult.Value != "deep" {
+		t.Errorf("got: %q, want: %q", innerResult.Value, "deep")
+	}
+}
+
+func TestUnwrapValue_interfaceWrapper(t *testing.T) {
+	// Test unwrapping through interface type
+	wrapper := TestWrapper[string]{Value: "test"}
+	var iface any = wrapper
+
+	result := UnwrapValue(reflect.ValueOf(iface))
+	if !result.IsValid() {
+		t.Fatal("UnwrapValue returned invalid value for interface wrapper")
+	}
+
+	if result.Interface() != "test" {
+		t.Errorf("got: %v, want: %q", result.Interface(), "test")
+	}
+}
+
+func TestUnwrapValueField_noValueField(t *testing.T) {
+	// Test wrapper without a Value field
+	wrapper := TestWrapperNoValueField{Data: "test"}
+
+	result := UnwrapValueField(reflect.ValueOf(wrapper))
+	if result.IsValid() {
+		t.Errorf(
+			"UnwrapValueField should return invalid for wrapper without Value field, got: %v",
+			result,
+		)
+	}
+}
+
+func TestUnwrapValue_multiLevelPointer(t *testing.T) {
+	// Test multi-level pointer unwrapping
+	wrapper := TestWrapper[int]{Value: 99}
+	ptr1 := &wrapper
+	ptr2 := &ptr1
+
+	result := UnwrapValue(reflect.ValueOf(ptr2))
+	if !result.IsValid() {
+		t.Fatal("UnwrapValue returned invalid value for double pointer")
+	}
+
+	if result.Interface() != 99 {
+		t.Errorf("got: %v, want: 99", result.Interface())
+	}
+}
+
+func TestGetGraphQLType_nilValue(t *testing.T) {
+	// Test GetGraphQLType with nil value
+	var nilPtr *CustomPointerType
+	v := reflect.ValueOf(nilPtr)
+	typeName, ok := GetGraphQLType(v, v.Type())
+
+	if ok {
+		t.Errorf(
+			"GetGraphQLType on nil pointer should return false, got: true with type %q",
+			typeName,
+		)
+	}
+}
+
+func TestGetGraphQLType_interfaceValue(t *testing.T) {
+	// Test GetGraphQLType with value wrapped in interface
+	custom := CustomType{Data: "test"}
+	var iface any = custom
+
+	v := reflect.ValueOf(iface)
+	typeName, ok := GetGraphQLType(v, v.Type())
+	if !ok {
+		t.Fatal("GetGraphQLType should return true for interface containing CustomType")
+	}
+
+	if typeName != "CustomScalar" {
+		t.Errorf("got: %q, want: %q", typeName, "CustomScalar")
+	}
+}
