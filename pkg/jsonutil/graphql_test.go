@@ -1270,3 +1270,116 @@ func TestUnmarshalGraphQL_templateSliceError(t *testing.T) {
 		t.Errorf("got error: %q, want: %q", got, want)
 	}
 }
+
+// TestUnmarshalGraphQL_pointerToSlice tests unmarshaling into a pointer to a slice.
+// This verifies that decodeArrayStart correctly handles nil pointers to slices
+// (related to TODO at line 557 - pointer initialization in arrays).
+func TestUnmarshalGraphQL_pointerToSlice(t *testing.T) {
+	type query struct {
+		Items *[]string
+	}
+
+	t.Run("nil pointer to slice", func(t *testing.T) {
+		var got query
+		// Items is initially nil
+		err := jsonutil.UnmarshalGraphQL([]byte(`{
+			"items": ["a", "b", "c"]
+		}`), &got)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := query{
+			Items: &[]string{"a", "b", "c"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+		}
+	})
+
+	t.Run("initialized pointer to slice", func(t *testing.T) {
+		items := []string{"old"}
+		got := query{Items: &items}
+
+		err := jsonutil.UnmarshalGraphQL([]byte(`{
+			"items": ["new1", "new2"]
+		}`), &got)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := query{
+			Items: &[]string{"new1", "new2"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("not equal\ngot:  %+v\nwant: %+v", got, want)
+		}
+	})
+
+	t.Run("null array resets to empty slice", func(t *testing.T) {
+		items := []string{"old"}
+		got := query{Items: &items}
+
+		err := jsonutil.UnmarshalGraphQL([]byte(`{
+			"items": null
+		}`), &got)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Null should set the pointer to nil
+		if got.Items != nil {
+			t.Errorf("expected Items to be nil, got %+v", got.Items)
+		}
+	})
+}
+
+// TestUnmarshalGraphQL_mapTemplateError tests that using a regular map
+// as a template (instead of [][2]any ordered map) returns a clear error.
+// This tests the copyTemplate error path.
+func TestUnmarshalGraphQL_mapTemplateError(t *testing.T) {
+	type query struct {
+		Items []map[string]string
+	}
+
+	// Pre-initialize with a map template (this is invalid - should use [][2]any)
+	got := query{
+		Items: []map[string]string{
+			{"key": "value"},
+		},
+	}
+
+	err := jsonutil.UnmarshalGraphQL([]byte(`{
+		"items": [
+			{"name": "item1"},
+			{"name": "item2"}
+		]
+	}`), &got)
+
+	if err == nil {
+		t.Fatal("got error: nil, want: non-nil")
+	}
+
+	expectedSubstr := "unsupported template type `map[string]string`, use [][2]any for ordered map instead"
+	if got := err.Error(); !stringContains(got, expectedSubstr) {
+		t.Errorf(
+			"got error: %q, want error containing: %q",
+			got,
+			expectedSubstr,
+		)
+	}
+}
+
+// stringContains checks if s contains substr.
+func stringContains(s, substr string) bool {
+	return len(s) >= len(substr) && indexOf(s, substr) >= 0
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}

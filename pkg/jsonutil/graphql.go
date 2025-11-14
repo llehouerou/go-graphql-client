@@ -506,7 +506,9 @@ func (d *decoder) decodeObjectStart() {
 	for i := 0; i < d.vs.len(); i++ {
 		v := d.vs.top(i)
 		frontier[i] = v
-		// TODO: Do this recursively or not? Add a test case if needed.
+		// Initialize only the immediate nil pointer, not recursively.
+		// Deeper levels are initialized as needed during field processing.
+		// Test coverage: TestUnmarshalGraphQL_nilPointerToWrapper (includes **Wrapper)
 		if v.Kind() == reflect.Ptr && v.IsNil() {
 			v.Set(reflect.New(v.Type().Elem())) // v = new(T).
 		}
@@ -554,10 +556,12 @@ func (d *decoder) decodeArrayStart() error {
 
 	for i := 0; i < d.vs.len(); i++ {
 		v := d.vs.top(i)
-		// TODO: Confirm this is needed, write a test case.
-		//if v.Kind() == reflect.Ptr && v.IsNil() {
-		//	v.Set(reflect.New(v.Type().Elem())) // v = new(T).
-		//}
+		// Initialize nil pointers before unwrapping.
+		// This handles cases like *[]string where the pointer is nil.
+		// Test coverage: TestUnmarshalGraphQL_pointerToSlice
+		if v.Kind() == reflect.Ptr && v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem())) // v = new(T).
+		}
 
 		// Reset slice to empty (in case it had non-zero initial value).
 		v = reflectutil.UnwrapToConcreteValue(v)
@@ -691,8 +695,11 @@ func hasGraphQLName(f reflect.StructField, v reflect.Value, name string) bool {
 		value, ok = f.Tag.Lookup(types.GraphQLTag)
 	}
 	if !ok {
-		// TODO: caseconv package is relatively slow. Optimize it, then consider using it here.
-		//return caseconv.MixedCapsToLowerCamelCase(f.Name) == name
+		// Fall back to case-insensitive comparison when no graphql tag is present.
+		// Using strings.EqualFold instead of caseconv.MixedCapsToLowerCamelCase
+		// for better performance. This is slightly less precise (doesn't handle
+		// camelCase conversion) but works well in practice since most GraphQL
+		// schemas use standard naming conventions.
 		return strings.EqualFold(f.Name, name)
 	}
 	return keyHasGraphQLName(value, name)
@@ -751,9 +758,12 @@ func extractFragmentTypename(tag string) string {
 // v must be addressable and not obtained by the use of unexported
 // struct fields, otherwise unmarshalValue will panic.
 func unmarshalValue(value any, v reflect.Value) error {
-	b, err := json.Marshal(
-		value,
-	) // TODO: Short-circuit (if profiling says it's worth it).
+	// This function uses json.Marshal + json.Unmarshal to convert JSON tokens
+	// (from the tokenizer) into Go values. While this could be optimized with
+	// direct type conversion for simple cases (string, number, bool), the current
+	// approach handles all edge cases correctly (custom UnmarshalJSON, etc.).
+	// TODO: Profile to measure impact, then consider optimizing hot paths if needed.
+	b, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
