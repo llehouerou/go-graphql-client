@@ -1390,6 +1390,156 @@ func TestClient_ImmutablePattern(t *testing.T) {
 			t.Error("client2 should have its modifier")
 		}
 	})
+
+	t.Run("WithRequestModifier preserves debug field", func(t *testing.T) {
+		// Create a client with debug enabled
+		original := graphql.NewClient("http://example.com/graphql", nil).
+			WithDebug(true)
+
+		// Add a request modifier - should preserve debug setting
+		_ = original.WithRequestModifier(func(r *http.Request) {
+			r.Header.Set("X-Test", "value")
+		})
+
+		// Test that debug mode is still active by triggering an error
+		// and checking if it includes debug information
+		server := httptest.NewServer(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				// Return a GraphQL error
+				w.Write([]byte(`{
+					"errors": [{
+						"message": "test error"
+					}]
+				}`))
+			}),
+		)
+		defer server.Close()
+
+		clientWithServer := graphql.NewClient(server.URL, nil).
+			WithDebug(true).
+			WithRequestModifier(func(r *http.Request) {
+				r.Header.Set("X-Test", "value")
+			})
+
+		var result struct{}
+		err := clientWithServer.Query(context.Background(), &result, nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		// Check if error contains debug information (extensions field)
+		gqlErrs, ok := err.(graphql.Errors)
+		if !ok {
+			t.Fatalf("expected graphql.Errors, got %T", err)
+		}
+
+		if len(gqlErrs) == 0 {
+			t.Fatal("expected at least one error")
+		}
+
+		// Debug mode adds extensions with request/response info
+		if gqlErrs[0].Extensions == nil {
+			t.Error("expected error extensions (debug info), got nil")
+		}
+	})
+
+	t.Run("WithDebug preserves requestModifier field", func(t *testing.T) {
+		modifierCalled := false
+
+		// Create a client with a request modifier
+		original := graphql.NewClient("http://example.com/graphql", nil).
+			WithRequestModifier(func(r *http.Request) {
+				modifierCalled = true
+				r.Header.Set("X-Modified", "true")
+			})
+
+		// Enable debug - should preserve the modifier
+		modified := original.WithDebug(true)
+
+		// Test that the modifier is still active
+		ctx := context.Background()
+		req, _, err := modified.BuildRequest(ctx, "{test}", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !modifierCalled {
+			t.Error("request modifier was not called (WithDebug lost the modifier)")
+		}
+
+		if req.Header.Get("X-Modified") != "true" {
+			t.Error("request modifier didn't apply the header (WithDebug lost the modifier)")
+		}
+	})
+
+	t.Run("WithRequestModifier then WithDebug preserves both fields", func(t *testing.T) {
+		modifierCalled := false
+
+		// Chain: modifier first, then debug
+		_ = graphql.NewClient("http://example.com/graphql", nil).
+			WithRequestModifier(func(r *http.Request) {
+				modifierCalled = true
+				r.Header.Set("X-Chain-Test", "present")
+			}).
+			WithDebug(true)
+
+		// Test with a real server to verify both debug and modifier work
+		server := httptest.NewServer(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Verify modifier was applied
+				if r.Header.Get("X-Chain-Test") != "present" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write(
+						[]byte(`{"errors": [{"message": "modifier header missing"}]}`),
+					)
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{
+					"errors": [{
+						"message": "test error for debug"
+					}]
+				}`))
+			}),
+		)
+		defer server.Close()
+
+		clientWithServer := graphql.NewClient(server.URL, nil).
+			WithRequestModifier(func(r *http.Request) {
+				modifierCalled = true
+				r.Header.Set("X-Chain-Test", "present")
+			}).
+			WithDebug(true)
+
+		var result struct{}
+		err := clientWithServer.Query(context.Background(), &result, nil)
+
+		if !modifierCalled {
+			t.Error("request modifier was not called")
+		}
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		// Verify debug info is present
+		gqlErrs, ok := err.(graphql.Errors)
+		if !ok {
+			t.Fatalf("expected graphql.Errors, got %T", err)
+		}
+
+		if len(gqlErrs) == 0 {
+			t.Fatal("expected at least one error")
+		}
+
+		if gqlErrs[0].Extensions == nil {
+			t.Error("expected error extensions (debug info), got nil - debug mode not preserved")
+		}
+	})
 }
 
 // TestClient_executeRequest tests the executeRequest method that executes

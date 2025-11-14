@@ -443,6 +443,17 @@ func (c *Client) processResponse(
 	return nil
 }
 
+// clone creates a copy of the Client with all fields preserved.
+// This helper prevents field-copying bugs when adding new fields to Client.
+func (c *Client) clone() *Client {
+	return &Client{
+		url:             c.url,
+		httpClient:      c.httpClient,
+		requestModifier: c.requestModifier,
+		debug:           c.debug,
+	}
+}
+
 // WithRequestModifier returns a new Client with the request modifier set.
 // This allows you to reuse the same TCP connection for multiple slightly
 // different requests to the same server (e.g., different authentication
@@ -458,11 +469,9 @@ func (c *Client) processResponse(
 //
 //	client = client.WithRequestModifier(modifier).WithDebug(true)
 func (c *Client) WithRequestModifier(f RequestModifier) *Client {
-	return &Client{
-		url:             c.url,
-		httpClient:      c.httpClient,
-		requestModifier: f,
-	}
+	clone := c.clone()
+	clone.requestModifier = f
+	return clone
 }
 
 // WithDebug returns a new Client with debug mode enabled or disabled.
@@ -479,12 +488,9 @@ func (c *Client) WithRequestModifier(f RequestModifier) *Client {
 //
 //	client = client.WithDebug(true).WithRequestModifier(modifier)
 func (c *Client) WithDebug(debug bool) *Client {
-	return &Client{
-		url:             c.url,
-		httpClient:      c.httpClient,
-		requestModifier: c.requestModifier,
-		debug:           debug,
-	}
+	clone := c.clone()
+	clone.debug = debug
+	return clone
 }
 
 // DecorateError decorates an error with request/response information if debug

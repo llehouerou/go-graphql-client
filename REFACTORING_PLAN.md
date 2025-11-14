@@ -1,147 +1,282 @@
-# Refactoring Plan - Code Organization & Maintainability
+# Refactoring Plan
 
-This document outlines focused refactoring opportunities to improve code organization, readability, and maintainability across the go-graphql-client module.
+Generated: 2025-11-14
 
-## 1. Extract long method: `decodeObjectKey` in pkg/jsonutil/graphql.go
-**Impact: High** | **Complexity: Medium** | **Location:** pkg/jsonutil/graphql.go:231-356
+## Overview
 
-This 125-line method does too much. Extract into helper methods:
-- `findFieldsForKey(key string) []fieldInfo` - First pass: field discovery
-- `selectFieldsByFragment(fields []fieldInfo) []reflect.Value` - Second pass: fragment filtering
-- Core method reduces to ~40 lines, much more readable
+This document outlines 10 focused refactoring actions to improve code organization, readability, and maintainability across the go-graphql-client codebase.
 
----
-
-## 2. Extract struct variable handling from `queryArguments`
-**Impact: High** | **Complexity: Medium** | **Location:** query.go:138-221
-
-The struct case is 64 lines within an 83-line function. Extract to:
-- `collectStructFieldsForArguments(typ, val) []fieldInfo` - Lines 166-204
-- `writeArgumentsFromFields(buf, fields)` - Lines 211-217
-
-Makes the main function a simple dispatcher between map vs struct cases.
+**Total Estimated Effort**: 35-50 hours
+**Current Test Coverage**: 80-88%
+**Target Coverage**: 90%+
 
 ---
 
-## 3. Consolidate pointer/interface unwrapping patterns
-**Impact: Medium** | **Complexity: Low** | **Files:** query.go, pkg/jsonutil/graphql.go
+## Top 10 Refactoring Actions
 
-Replace manual unwrapping loops throughout the codebase with the existing `reflectutil.UnwrapToConcreteValue()`. Found at:
-- query.go:256-258 (in writeStructQuery)
-- query.go:442-444 (in writeInterfaceQuery)
-- pkg/jsonutil/graphql.go:256-258, 364-366, 496-498, 596-599
+### 1. FIX: WithRequestModifier Clone Pattern Bug ✅
+**Location**: `graphql.go:446-494`
+**Effort**: 1 hour | **Risk**: Low | **Impact**: High
+**Status**: COMPLETED
 
----
+**Issue**: `WithRequestModifier()` doesn't copy the `debug` field when creating a new client, causing state loss.
 
-## 4. Remove dead code: unused fragment filtering methods
-**Impact: Low** | **Complexity: Low** | **Location:** pkg/jsonutil/graphql.go:109-142
-
-Delete `shouldIncludeFragment` and `shouldIncludeFragmentByTag` (lines 109-142) marked with `//nolint:unused`. The filtering logic was refactored inline into `decodeObjectKey` and these are no longer called.
-
----
-
-## 5. Extract field processing logic from `writeStructQuery`
-**Impact: High** | **Complexity: Medium** | **Location:** query.go:299-410
-
-The struct field loop (lines 337-405, 68 lines) is complex. Extract to:
+**Action**: Extract a `clone()` helper method that copies all fields:
 ```go
-type fieldOutput struct {
-    shouldSkip bool
-    name string
-    isInline bool
-    value reflect.Value
+func (c *Client) clone() *Client {
+    return &Client{
+        url:             c.url,
+        httpClient:      c.httpClient,
+        requestModifier: c.requestModifier,
+        debug:           c.debug,
+    }
 }
 
-func processStructField(f reflect.StructField, v reflect.Value) fieldOutput
+func (c *Client) WithDebug(debug bool) *Client {
+    clone := c.clone()
+    clone.debug = debug
+    return clone
+}
+
+func (c *Client) WithRequestModifier(f RequestModifier) *Client {
+    clone := c.clone()
+    clone.requestModifier = f
+    return clone
+}
 ```
 
+**Value**: Prevents field-copying bugs when adding future fields. Improves maintainability.
+
+**Tests Implemented**:
+- ✅ Test that `WithRequestModifier()` preserves `debug` field
+- ✅ Test that `WithDebug()` preserves `requestModifier` field
+- ✅ Test chaining: both `WithDebug().WithRequestModifier()` and `WithRequestModifier().WithDebug()`
+
+**Results**:
+- All tests pass (0 failures)
+- Linter: 0 issues
+- Coverage improved: 80.1% → 81.3%
+- Bug fixed: `WithRequestModifier()` now correctly copies all Client fields
+- Future-proof: Adding new fields to Client won't cause bugs
+
 ---
 
-## 6. Deduplicate `isTrue()` helper function
-**Impact: Low** | **Complexity: Low** | **Files:** query.go:524, pkg/jsonutil/graphql.go:642
+### 2. READABILITY: Remove Magic Numbers and Strings
+**Location**: Multiple files
+**Effort**: 1-2 hours | **Risk**: Very Low | **Impact**: High
+**Status**: PENDING
 
-Same function exists in both locations. Extract to `internal/reflectutil/helpers.go` or similar and import from both locations.
+**Locations**:
+- `query.go:189` - `for i := 2; i <= len(word)-2`
+- `pkg/jsonutil/graphql.go:572` - `"template slice can only have 1 item"`
+- Error code comparisons with hardcoded strings
 
----
-
-## 7. Split mixed const block separating operation types and error codes
-**Impact: Low** | **Complexity: Low** | **Location:** graphql.go:700-712
-
-Lines 700-712 mix operationType enum with error code strings. Split into two const blocks for clarity:
+**Action**: Extract named constants:
 ```go
+// In appropriate files
 const (
-    queryOperation operationType = iota
-    mutationOperation
-)
-
-const (
-    ErrRequestError  = "request_error"
-    ErrJsonEncode    = "json_encode_error"
-    // ...
+    minInitialismLength = 2
+    maxTemplateSliceSize = 1
 )
 ```
 
----
-
-## 8. Consolidate error decoration logic in `withRequest`/`withResponse`
-**Impact: Medium** | **Complexity: Low** | **Location:** graphql.go:655-688
-
-These methods (lines 655-688) are nearly identical. Extract common pattern:
-```go
-func (e Error) withDebugInfo(infoType string, headers http.Header, bodyReader io.Reader) Error
-```
-
-Then implement both methods as thin wrappers.
+**Value**: Self-documenting code, easier to maintain and modify.
 
 ---
 
-## 9. Add helper for numeric kind checking in `writeArgumentType`
-**Impact: Low** | **Complexity: Low** | **Location:** query.go:265-266
+### 3. CONSISTENCY: Consolidate Error Creation Patterns
+**Location**: `graphql.go` (throughout)
+**Effort**: 3-4 hours | **Risk**: Low | **Impact**: High
+**Status**: PENDING
 
-Lines 265-266 list 10 numeric kinds that all map to "Int". Extract:
+**Issue**: Inconsistent error handling patterns:
+- Sometimes uses `newError()`
+- Sometimes uses `c.NewRequestError()` with full context
+- Sometimes creates `Errors{}` directly
+- Inconsistent `%w` wrapping
+
+**Action**:
+- Standardize on helper methods with consistent patterns
+- Always use `%w` for error wrapping
+- Ensure debug info is added consistently
+- Create specialized helpers if needed
+
+**Value**: Easier debugging, consistent error messages, better maintainability.
+
+---
+
+### 4. ORGANIZATION: Split query.go into Focused Files
+**Location**: `query.go` (586 lines)
+**Effort**: 3-4 hours | **Risk**: Very Low | **Impact**: High
+**Status**: PENDING
+
+**Issue**: Single file mixes multiple responsibilities:
+- High-level query construction
+- Variable argument formatting
+- Low-level query writing
+- Type-specific handlers
+
+**Action**: Split into:
+- `query.go` - Public API (ConstructQuery, ConstructMutation, ConstructSubscription)
+- `query_arguments.go` - Variable argument formatting logic
+- `query_writer.go` - Low-level writing logic and type handlers
+
+**Value**: Much easier to navigate, clear separation of concerns.
+
+---
+
+### 5. COMPLEXITY: Split request() Method
+**Location**: `graphql.go:135-255` (120 lines)
+**Effort**: 4-6 hours | **Risk**: Medium | **Impact**: Very High
+**Status**: PENDING
+
+**Issue**: `request()` does too much in one method:
+- HTTP request execution
+- Gzip decompression handling
+- Debug mode response copying
+- Status code checking
+- Response decoding
+- Error decoration
+
+**Action**: Extract focused helper methods:
+- `handleGzipResponse(resp) (io.Reader, error)`
+- `copyResponseForDebug(resp) ([]byte, error)`
+- Use existing `BuildRequest()` and `DecodeResponse()` more directly
+
+**Value**: Each step becomes testable in isolation. Much easier to understand control flow.
+
+---
+
+### 6. COMPLEXITY: Extract Query Handler Methods
+**Location**: `query.go:399-582`
+**Effort**: 6-8 hours | **Risk**: Medium | **Impact**: Medium
+**Status**: PENDING
+
+**Issue**: While `writeQuery()` delegates to type-specific handlers, `writeStructQuery()` is still 75 lines and handles multiple concerns.
+
+**Action**:
+- Break down `writeStructQuery()` into smaller pieces
+- Extract field processing logic
+- Clarify template pattern handling
+
+**Value**: Core query construction becomes easier to understand and extend.
+
+---
+
+### 7. TECH DEBT: Address TODOs with Tests
+**Location**: `pkg/jsonutil/graphql.go` (4 TODOs)
+**Effort**: 4-5 hours | **Risk**: Low | **Impact**: Medium
+**Status**: PENDING
+
+**TODOs**:
+- Line 503: Recursive handling uncertainty
+- Line 551: Nested wrapper type handling
+- Line 682: Performance optimization opportunity
+- Line 744: Short-circuit optimization
+
+**Action**:
+- Write test cases for recursive and edge cases (lines 503, 551)
+- Profile to determine if optimizations are needed (lines 682, 744)
+- Document decisions or implement fixes
+- Remove TODOs once resolved
+
+**Value**: Removes uncertainty, improves test coverage, may uncover bugs.
+
+---
+
+### 8. QUALITY: Add Edge Case Test Coverage
+**Location**: Various test files
+**Effort**: 6-8 hours | **Risk**: Low | **Impact**: High
+**Status**: PENDING
+
+**Current Coverage**: 80-88%
+**Target**: 90%+
+
+**Gaps**:
+- Recursive struct handling in unmarshaling
+- Nested wrapper types
+- Error paths in gzip handling
+- Fragment matching edge cases
+- Ordered map template copying
+
+**Action**:
+- Add tests for each TODO scenario
+- Add fuzz testing for unmarshaling
+- Add property-based tests for query construction
+
+**Value**: Safety net for all refactorings. Catches regressions early.
+
+---
+
+### 9. DOCUMENTATION: Clarify Panic vs Error Return
+**Location**: `query.go:189`
+**Effort**: 2-3 hours | **Risk**: Medium | **Impact**: Medium
+**Status**: PENDING
+
+**Issue**: Code panics when variables aren't a struct/map:
 ```go
-func isIntegerKind(k reflect.Kind) bool {
-    return k >= reflect.Int && k <= reflect.Uint64 && k != reflect.Uintptr
+if typ.Kind() != reflect.Struct {
+    panic(fmt.Sprintf("variables must be a struct or a map; got %T", variables))
 }
 ```
 
----
+**Decision Needed**:
+1. Document that this is intentional for programming errors (add godoc)
+2. Return error instead (breaking change, requires major version bump)
 
-## 10. Group related decoder stack operations into a helper struct
-**Impact: Medium** | **Complexity: High** | **Location:** pkg/jsonutil/graphql.go:70-97 and related methods
-
-The decoder manages 3 parallel slices (`vs`, `fragmentTypes`, and state). Encapsulate as:
-```go
-type valueStack struct {
-    values []stack
-    fragmentTypes []string
-}
-// Methods: push, pop, filter, etc.
-```
-
-Reduces cognitive load and prevents sync bugs between parallel slices.
+**Value**: Clearer API contract, better error handling guidance.
 
 ---
 
-## Priority Recommendations
+### 10. ADVANCED: Refactor decode() Loop ⚠️ HIGH RISK
+**Location**: `pkg/jsonutil/graphql.go:191-264` (73 lines)
+**Effort**: 8-10 hours | **Risk**: HIGH | **Impact**: High
+**Status**: PENDING
 
-### High Priority (biggest impact on maintainability)
-- #1: Extract decodeObjectKey
-- #2: Extract queryArguments struct handling
-- #5: Extract writeStructQuery field processing
+**Issue**: Main unmarshaling loop handles all JSON token types in a complex nested switch with state management mixed into processing logic.
 
-### Medium Priority (reduce duplication)
-- #3: Consolidate unwrapping patterns
-- #8: Consolidate error decoration
+**Action**:
+- Extract token handlers: `handleObjectToken()`, `handleArrayToken()`, `handleScalarToken()`
+- Document state machine transitions
+- Consider state pattern or clearer state machine design
 
-### Low Priority (quick wins)
-- #4: Remove dead code
-- #6: Deduplicate isTrue
-- #7: Split const block
+**Value**: Core unmarshaling becomes more understandable.
+
+**Warning**: Should only be attempted AFTER:
+- Other refactorings are complete
+- Test coverage is 90%+
+- High confidence in the test suite
 
 ---
 
-## Notes
-- All changes maintain backward compatibility
-- Focus on internal refactoring without API changes
-- Subscription code excluded as per requirements
+## Execution Phases
+
+### Phase 1: Quick Wins (5-7 hours)
+- [ ] #1: Fix WithRequestModifier bug
+- [ ] #2: Remove magic numbers
+- [ ] #3: Consolidate error patterns
+
+### Phase 2: Organization (7-10 hours)
+- [ ] #4: Split query.go file
+- [ ] #8: Add edge case tests (safety net)
+
+### Phase 3: Complexity Reduction (10-14 hours)
+- [ ] #5: Split request() method
+- [ ] #6: Extract query handlers
+
+### Phase 4: Clean Up (6-8 hours)
+- [ ] #7: Address TODOs
+- [ ] #9: Document panic usage
+
+### Phase 5: Advanced (8-10 hours, optional)
+- [ ] #10: Refactor decode() loop (only after phases 1-4)
+
+---
+
+## Impact Summary
+
+**Organization**: #3, #4 (split files, consolidate patterns)
+**Readability**: #2, #5, #6 (magic numbers, split methods)
+**Maintainability**: #1, #7, #8 (bug fixes, tests, tech debt)
+
+**Immediate Priority**: Phase 1 (Quick Wins) to build momentum before larger refactorings.
