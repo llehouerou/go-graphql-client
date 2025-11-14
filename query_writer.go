@@ -101,44 +101,28 @@ func processStructField(
 	}
 }
 
-// writeStructQuery writes a minified query for a struct type to w.
-// If inline is true, the struct fields are inlined into parent struct.
-func writeStructQuery(
+// isScalarType checks if a type should be treated as a GraphQL scalar
+// and not expanded during query construction.
+// Returns true for types implementing json.Unmarshaler or ID type.
+func isScalarType(t reflect.Type) bool {
+	// If the type implements json.Unmarshaler, it's a scalar. Don't expand it.
+	if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
+		return true
+	}
+	// ID type is also a scalar
+	if t.AssignableTo(idType) {
+		return true
+	}
+	return false
+}
+
+// writeStructFields iterates over struct fields and writes them to w.
+// Returns an error if field processing fails.
+func writeStructFields(
 	w io.Writer,
 	t reflect.Type,
 	v reflect.Value,
-	inline bool,
 ) error {
-	if v.IsValid() && reflectutil.IsWrapperType(v) {
-		wrapped := reflectutil.UnwrapValue(v)
-		if wrapped.IsValid() {
-			err := writeQuery(
-				w,
-				wrapped.Type(),
-				wrapped,
-				inline,
-			)
-			if err != nil {
-				return fmt.Errorf(
-					"failed to write query for wrapped struct `%v`: %w",
-					t,
-					err,
-				)
-			}
-			return nil
-		}
-	}
-
-	// If the type implements json.Unmarshaler, it's a scalar. Don't expand it.
-	if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
-		return nil
-	}
-	if t.AssignableTo(idType) {
-		return nil
-	}
-	if !inline {
-		_, _ = io.WriteString(w, "{")
-	}
 	iter := 0
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
@@ -172,6 +156,50 @@ func writeStructQuery(
 			)
 		}
 	}
+	return nil
+}
+
+// writeStructQuery writes a minified query for a struct type to w.
+// If inline is true, the struct fields are inlined into parent struct.
+func writeStructQuery(
+	w io.Writer,
+	t reflect.Type,
+	v reflect.Value,
+	inline bool,
+) error {
+	if v.IsValid() && reflectutil.IsWrapperType(v) {
+		wrapped := reflectutil.UnwrapValue(v)
+		if wrapped.IsValid() {
+			err := writeQuery(
+				w,
+				wrapped.Type(),
+				wrapped,
+				inline,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"failed to write query for wrapped struct `%v`: %w",
+					t,
+					err,
+				)
+			}
+			return nil
+		}
+	}
+
+	// If the type is a scalar, don't expand it
+	if isScalarType(t) {
+		return nil
+	}
+	if !inline {
+		_, _ = io.WriteString(w, "{")
+	}
+
+	err := writeStructFields(w, t, v)
+	if err != nil {
+		return err
+	}
+
 	if !inline {
 		_, _ = io.WriteString(w, "}")
 	}
