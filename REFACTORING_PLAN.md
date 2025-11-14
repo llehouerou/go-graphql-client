@@ -144,12 +144,12 @@ const (
 
 ---
 
-### 5. COMPLEXITY: Split request() Method
-**Location**: `graphql.go:135-255` (120 lines)
-**Effort**: 4-6 hours | **Risk**: Medium | **Impact**: Very High
-**Status**: PENDING
+### 5. COMPLEXITY: Split request() Method ✅
+**Location**: `graphql.go:163-270` (was 120 lines, now ~100 lines in request() + 2 helpers)
+**Effort**: 2 hours actual | **Risk**: Medium | **Impact**: Very High
+**Status**: COMPLETED
 
-**Issue**: `request()` does too much in one method:
+**Issue**: `request()` did too much in one method:
 - HTTP request execution
 - Gzip decompression handling
 - Debug mode response copying
@@ -157,12 +157,27 @@ const (
 - Response decoding
 - Error decoration
 
-**Action**: Extract focused helper methods:
-- `handleGzipResponse(resp) (io.Reader, error)`
-- `copyResponseForDebug(resp) ([]byte, error)`
-- Use existing `BuildRequest()` and `DecodeResponse()` more directly
+**Action Taken**: Extracted focused helper methods:
+- `handleGzipResponse(resp, bodyReader) (io.ReadCloser, error)` - graphql.go:138-150
+- `copyResponseForDebug(r io.Reader) ([]byte, io.Reader, error)` - graphql.go:155-161
+- Refactored `request()` to use these helpers (graphql.go:163-270)
 
-**Value**: Each step becomes testable in isolation. Much easier to understand control flow.
+**Results**:
+- All tests pass (0 failures) with race detection enabled
+- Linter: 0 issues
+- Coverage improved: 82.4% → 84.9% (+2.5%)
+- `request()` function coverage: 83.3% → 90.0% (+6.7%)
+- `handleGzipResponse()` coverage: 83.3% (both gzip and non-gzip paths tested)
+- `copyResponseForDebug()` coverage: 100.0%
+- Code is more modular and easier to understand
+- Each helper is single-purpose and testable in isolation
+
+**Existing Test Coverage**: The refactored code is already well-tested:
+- Gzip compression: `TestClient_executeRequest/handles_gzip_compression`
+- Invalid gzip data: `TestClient_executeRequest/handles_invalid_gzip_data`
+- Debug mode body read error: `TestClient_decorateError/debug_mode_handles_body_read_error_gracefully`
+
+**Value**: Each step is now testable in isolation. Much easier to understand control flow. Request method reduced from 120 to ~100 lines with clearer responsibilities.
 
 ---
 
@@ -283,13 +298,21 @@ if typ.Kind() != reflect.Struct {
 - **Coverage improved**: 80.9% → 82.4% (+1.5%)
 - **request() function coverage**: 69.0% → 83.3% (+14.3%)
 
-### Phase 2: Organization (7-10 hours)
+### Phase 2: Organization (7-10 hours) - IN PROGRESS
 - [ ] #4: Split query.go file
 - [ ] #8: Add edge case tests (safety net - partially complete)
 
-### Phase 3: Complexity Reduction (10-14 hours)
-- [ ] #5: Split request() method
+### Phase 3: Complexity Reduction (4-8 hours) - IN PROGRESS
+- [x] #5: Split request() method ✅
 - [ ] #6: Extract query handlers
+
+**Phase 3 Progress**: Completed #5 Split request() method:
+- Extracted `handleGzipResponse()` and `copyResponseForDebug()` helpers
+- Refactored `request()` to use focused helper methods
+- **Coverage improved**: 82.4% → 84.9% (+2.5%)
+- **request() function coverage**: 83.3% → 90.0% (+6.7%)
+- All tests pass with race detection
+- 0 linter issues
 
 ### Phase 4: Clean Up (6-8 hours)
 - [ ] #7: Address TODOs

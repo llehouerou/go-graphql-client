@@ -132,6 +132,34 @@ func (c *Client) buildAndRequest(
 }
 
 // Request the common method that send graphql request
+// handleGzipResponse wraps the response body reader with a gzip decompressor
+// if the Content-Encoding header indicates gzip compression.
+// Returns the potentially-wrapped reader and any error encountered.
+func handleGzipResponse(
+	resp *http.Response,
+	bodyReader io.Reader,
+) (io.ReadCloser, error) {
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gr, err := gzip.NewReader(bodyReader)
+		if err != nil {
+			return nil, fmt.Errorf("problem trying to create gzip reader: %w", err)
+		}
+		return gr, nil
+	}
+	return io.NopCloser(bodyReader), nil
+}
+
+// copyResponseForDebug reads the entire response body into memory
+// and returns both the bytes and a reader positioned at the start.
+// This allows the response to be decoded while preserving a copy for debug logging.
+func copyResponseForDebug(r io.Reader) ([]byte, io.Reader, error) {
+	respBody, err := io.ReadAll(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	return respBody, bytes.NewReader(respBody), nil
+}
+
 func (c *Client) request(
 	ctx context.Context,
 	query string,
@@ -166,21 +194,6 @@ func (c *Client) request(
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	r := resp.Body
-
-	// Handle gzip decompression
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		gr, err := gzip.NewReader(r)
-		if err != nil {
-			return nil, nil, nil, newSimpleErrors(
-				ErrJsonDecode,
-				fmt.Errorf("problem trying to create gzip reader: %w", err),
-			)
-		}
-		defer func() { _ = gr.Close() }()
-		r = gr
-	}
-
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -195,15 +208,23 @@ func (c *Client) request(
 		return nil, nil, nil, Errors{err}
 	}
 
+	// Handle gzip decompression
+	r, err := handleGzipResponse(resp, resp.Body)
+	if err != nil {
+		return nil, nil, nil, newSimpleErrors(ErrJsonDecode, err)
+	}
+	defer func() { _ = r.Close() }()
+
 	// Copy response body for debugging if needed
 	var respBody []byte
 	var respReader *bytes.Reader
 	if c.debug {
-		respBody, err = io.ReadAll(r)
+		var debugReader io.Reader
+		respBody, debugReader, err = copyResponseForDebug(r)
 		if err != nil {
 			return nil, nil, nil, newSimpleErrors(ErrJsonDecode, err)
 		}
-		respReader = bytes.NewReader(respBody)
+		respReader = debugReader.(*bytes.Reader)
 		r = io.NopCloser(respReader)
 	}
 
