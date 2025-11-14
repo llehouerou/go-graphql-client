@@ -518,3 +518,255 @@ func TestProcessStructField_scalar(t *testing.T) {
 		}
 	})
 }
+
+// TestQuery_ErrorPath tests the error path in the query() function
+func TestQuery_ErrorPath(t *testing.T) {
+	t.Run("error from writeQuery is wrapped", func(t *testing.T) {
+		// Use a map type which is not supported and should cause an error
+		invalidQuery := map[string]string{"key": "value"}
+
+		_, err := query(invalidQuery)
+		if err == nil {
+			t.Fatal("expected error from query with map type, got nil")
+		}
+
+		// Check that error is wrapped with "failed to write query"
+		if !contains(err.Error(), "failed to write query") {
+			t.Errorf("expected error to contain 'failed to write query', got: %v", err)
+		}
+
+		// Check that original error message is preserved
+		if !contains(err.Error(), "not supported") {
+			t.Errorf("expected error to contain 'not supported', got: %v", err)
+		}
+	})
+}
+
+// TestWriteQuery_MapError tests that maps produce an error
+func TestWriteQuery_MapError(t *testing.T) {
+	t.Run("map type produces error", func(t *testing.T) {
+		var buf bytes.Buffer
+		mapType := reflect.TypeOf(map[string]string{})
+		mapValue := reflect.ValueOf(map[string]string{"key": "value"})
+
+		err := writeQuery(&buf, mapType, mapValue, false)
+		if err == nil {
+			t.Fatal("expected error for map type, got nil")
+		}
+
+		if !contains(err.Error(), "not supported") {
+			t.Errorf("expected error to contain 'not supported', got: %v", err)
+		}
+		if !contains(err.Error(), "[][2]any") {
+			t.Errorf("expected error to suggest '[][2]any', got: %v", err)
+		}
+	})
+}
+
+// TestWriteSliceQuery_ErrorPath tests error handling in writeSliceQuery
+func TestWriteSliceQuery_ErrorPath(t *testing.T) {
+	t.Run("error from nested writeQuery is wrapped", func(t *testing.T) {
+		var buf bytes.Buffer
+		// Slice of maps - should error because maps are not supported
+		sliceType := reflect.TypeOf([]map[string]string{})
+		sliceValue := reflect.ValueOf([]map[string]string{{"key": "value"}})
+
+		err := writeSliceQuery(&buf, sliceType, sliceValue)
+		if err == nil {
+			t.Fatal("expected error from slice of maps, got nil")
+		}
+
+		if !contains(err.Error(), "failed to write query for slice item") {
+			t.Errorf("expected error to contain 'failed to write query for slice item', got: %v", err)
+		}
+	})
+}
+
+// TestWriteOrderedMapQuery_ErrorPath tests error handling in writeOrderedMapQuery
+func TestWriteOrderedMapQuery_ErrorPath(t *testing.T) {
+	t.Run("invalid array length produces error", func(t *testing.T) {
+		var buf bytes.Buffer
+		// [][3]any - should fail because only [][2]any is supported
+		sliceType := reflect.TypeOf([][3]any{})
+		sliceValue := reflect.ValueOf([][3]any{{"key", "value", "extra"}})
+
+		err := writeOrderedMapQuery(&buf, sliceType, sliceValue)
+		if err == nil {
+			t.Fatal("expected error for array length != 2, got nil")
+		}
+
+		if !contains(err.Error(), "only arrays of len 2 are supported") {
+			t.Errorf("expected error about array length, got: %v", err)
+		}
+	})
+
+	t.Run("non-string key produces error", func(t *testing.T) {
+		var buf bytes.Buffer
+		// [][2]any with non-string key
+		sliceType := reflect.TypeOf([][2]any{})
+		sliceValue := reflect.ValueOf([][2]any{{123, "value"}})
+
+		err := writeOrderedMapQuery(&buf, sliceType, sliceValue)
+		if err == nil {
+			t.Fatal("expected error for non-string key, got nil")
+		}
+
+		if !contains(err.Error(), "expected pair (string") {
+			t.Errorf("expected error about string key, got: %v", err)
+		}
+	})
+
+	t.Run("error from nested writeQuery is wrapped", func(t *testing.T) {
+		var buf bytes.Buffer
+		// [][2]any with map value - should error
+		sliceType := reflect.TypeOf([][2]any{})
+		sliceValue := reflect.ValueOf([][2]any{{"key", map[string]string{"nested": "map"}}})
+
+		err := writeOrderedMapQuery(&buf, sliceType, sliceValue)
+		if err == nil {
+			t.Fatal("expected error from nested map value, got nil")
+		}
+
+		if !contains(err.Error(), "failed to write query for pair[1]") {
+			t.Errorf("expected error to contain 'failed to write query for pair[1]', got: %v", err)
+		}
+	})
+}
+
+// TestWriteInterfaceQuery_ErrorPath tests error handling in writeInterfaceQuery
+func TestWriteInterfaceQuery_ErrorPath(t *testing.T) {
+	t.Run("error from nested writeQuery is wrapped", func(t *testing.T) {
+		var buf bytes.Buffer
+		// Interface containing a map - should error
+		var iface any = map[string]string{"key": "value"}
+		ifaceType := reflect.TypeOf((*any)(nil)).Elem()
+		ifaceValue := reflect.ValueOf(iface)
+
+		err := writeInterfaceQuery(&buf, ifaceType, ifaceValue, false)
+		if err == nil {
+			t.Fatal("expected error from interface containing map, got nil")
+		}
+
+		if !contains(err.Error(), "failed to write query for interface") {
+			t.Errorf("expected error to contain 'failed to write query for interface', got: %v", err)
+		}
+	})
+
+	t.Run("nil interface is handled", func(t *testing.T) {
+		var buf bytes.Buffer
+		var iface any
+		ifaceType := reflect.TypeOf((*any)(nil)).Elem()
+		ifaceValue := reflect.ValueOf(&iface).Elem()
+
+		err := writeInterfaceQuery(&buf, ifaceType, ifaceValue, false)
+		if err != nil {
+			t.Fatalf("expected no error for nil interface, got: %v", err)
+		}
+
+		if buf.String() != "" {
+			t.Errorf("expected empty output for nil interface, got: %q", buf.String())
+		}
+	})
+
+	t.Run("interface containing nil pointer is handled", func(t *testing.T) {
+		var buf bytes.Buffer
+		var ptr *string
+		iface := any(ptr)
+		ifaceType := reflect.TypeOf((*any)(nil)).Elem()
+		ifaceValue := reflect.ValueOf(iface)
+
+		err := writeInterfaceQuery(&buf, ifaceType, ifaceValue, false)
+		if err != nil {
+			t.Fatalf("expected no error for interface with nil pointer, got: %v", err)
+		}
+
+		if buf.String() != "" {
+			t.Errorf("expected empty output for interface with nil pointer, got: %q", buf.String())
+		}
+	})
+}
+
+// TestWriteStructQuery_ErrorPath tests error handling in writeStructQuery
+func TestWriteStructQuery_ErrorPath(t *testing.T) {
+	t.Run("error from nested field writeQuery is wrapped", func(t *testing.T) {
+		var buf bytes.Buffer
+		type TestStruct struct {
+			InvalidField map[string]string
+		}
+		structType := reflect.TypeOf(TestStruct{})
+		structValue := reflect.ValueOf(TestStruct{
+			InvalidField: map[string]string{"key": "value"},
+		})
+
+		err := writeStructQuery(&buf, structType, structValue, false)
+		if err == nil {
+			t.Fatal("expected error from struct with map field, got nil")
+		}
+
+		if !contains(err.Error(), "failed to write query for struct field") {
+			t.Errorf("expected error to contain 'failed to write query for struct field', got: %v", err)
+		}
+	})
+}
+
+// TestWriteQuery_PtrErrorPath tests error handling for pointer types in writeQuery
+func TestWriteQuery_PtrErrorPath(t *testing.T) {
+	t.Run("error from pointer element is wrapped", func(t *testing.T) {
+		var buf bytes.Buffer
+		// Pointer to map - should error
+		mapVal := map[string]string{"key": "value"}
+		ptrType := reflect.TypeOf(&mapVal)
+		ptrValue := reflect.ValueOf(&mapVal)
+
+		err := writeQuery(&buf, ptrType, ptrValue, false)
+		if err == nil {
+			t.Fatal("expected error from pointer to map, got nil")
+		}
+
+		if !contains(err.Error(), "failed to write query for ptr") {
+			t.Errorf("expected error to contain 'failed to write query for ptr', got: %v", err)
+		}
+	})
+}
+
+// TestConstructOptions_InvalidType tests the error path for invalid option types
+func TestConstructOptions_InvalidType(t *testing.T) {
+	// Create a mock option with an invalid type
+	invalidOption := &mockInvalidOption{}
+
+	_, err := constructOptions([]Option{invalidOption})
+	if err == nil {
+		t.Fatal("expected error for invalid option type, got nil")
+	}
+
+	if !contains(err.Error(), "invalid query option type") {
+		t.Errorf("expected error to contain 'invalid query option type', got: %v", err)
+	}
+}
+
+// mockInvalidOption implements Option with an invalid type for testing
+type mockInvalidOption struct{}
+
+func (m *mockInvalidOption) Type() OptionType {
+	return OptionType("invalid-option-type")
+}
+
+func (m *mockInvalidOption) String() string {
+	return "invalid"
+}
+
+// TestConstructOperation_OptionError tests error propagation from constructOptions
+func TestConstructOperation_OptionError(t *testing.T) {
+	type TestQuery struct {
+		Field string
+	}
+
+	_, err := ConstructQuery(TestQuery{}, nil, &mockInvalidOption{})
+	if err == nil {
+		t.Fatal("expected error from invalid option, got nil")
+	}
+
+	if !contains(err.Error(), "invalid query option type") {
+		t.Errorf("expected error about invalid option type, got: %v", err)
+	}
+}
