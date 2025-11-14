@@ -125,7 +125,7 @@ func (c *Client) buildAndRequest(
 	}
 
 	if err != nil {
-		return nil, nil, nil, Errors{newError(ErrGraphQLEncode, err)}
+		return nil, nil, nil, newSimpleErrors(ErrGraphQLEncode, err)
 	}
 
 	return c.request(ctx, query, variables)
@@ -172,12 +172,10 @@ func (c *Client) request(
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gr, err := gzip.NewReader(r)
 		if err != nil {
-			return nil, nil, nil, Errors{
-				newError(
-					ErrJsonDecode,
-					fmt.Errorf("problem trying to create gzip reader: %w", err),
-				),
-			}
+			return nil, nil, nil, newSimpleErrors(
+				ErrJsonDecode,
+				fmt.Errorf("problem trying to create gzip reader: %w", err),
+			)
 		}
 		defer func() { _ = gr.Close() }()
 		r = gr
@@ -203,7 +201,7 @@ func (c *Client) request(
 	if c.debug {
 		respBody, err = io.ReadAll(r)
 		if err != nil {
-			return nil, nil, nil, Errors{newError(ErrJsonDecode, err)}
+			return nil, nil, nil, newSimpleErrors(ErrJsonDecode, err)
 		}
 		respReader = bytes.NewReader(respBody)
 		r = io.NopCloser(respReader)
@@ -339,7 +337,7 @@ func (c *Client) DecodeResponse(reader io.Reader) ([]byte, Errors) {
 
 	err := json.NewDecoder(reader).Decode(&out)
 	if err != nil {
-		return nil, Errors{newError(ErrJsonDecode, err)}
+		return nil, newSimpleErrors(ErrJsonDecode, err)
 	}
 
 	var rawData []byte
@@ -649,6 +647,8 @@ func (e Error) getInternalExtension() map[string]any {
 	return make(map[string]any)
 }
 
+// newError creates a new Error with the given code and underlying error.
+// The underlying error is stored in the extensions for debugging.
 func newError(code string, err error) Error {
 	return Error{
 		Message: err.Error(),
@@ -656,6 +656,13 @@ func newError(code string, err error) Error {
 			"code": code,
 		},
 	}
+}
+
+// newSimpleErrors creates an Errors slice with a single error, wrapping the
+// given error with the specified code. This is a convenience method for simple
+// error cases that don't have request/response context.
+func newSimpleErrors(code string, err error) Errors {
+	return Errors{newError(code, err)}
 }
 
 // withDebugInfo adds debug information to the error's internal extensions.

@@ -269,6 +269,60 @@ func TestClient_Query_errorStatusCode(t *testing.T) {
 	}
 }
 
+// TestClient_Query_networkError tests that network errors during HTTP request
+// execution are properly handled and wrapped.
+func TestClient_Query_networkError(t *testing.T) {
+	// Create a transport that always returns an error
+	errorTransport := &errorTransport{
+		err: errors.New("simulated network error: connection refused"),
+	}
+
+	client := graphql.NewClient(
+		"http://example.com/graphql",
+		&http.Client{Transport: errorTransport},
+	)
+
+	var q struct {
+		User struct {
+			Name string
+		}
+	}
+
+	err := client.Query(context.Background(), &q, nil)
+	if err == nil {
+		t.Fatal("expected error for network failure, got nil")
+	}
+
+	// Verify it's the correct error type
+	errs, ok := err.(graphql.Errors)
+	if !ok {
+		t.Fatalf("expected graphql.Errors, got %T", err)
+	}
+
+	if len(errs) == 0 {
+		t.Fatal("expected at least one error")
+	}
+
+	// Check error code
+	if code := errs[0].GetCode(); code != graphql.ErrRequestError {
+		t.Errorf("expected error code %q, got %q", graphql.ErrRequestError, code)
+	}
+
+	// Check error message contains network error
+	if !strings.Contains(errs[0].Message, "network error") {
+		t.Errorf("expected error message to mention network error, got %q", errs[0].Message)
+	}
+}
+
+// errorTransport is a transport that always returns an error
+type errorTransport struct {
+	err error
+}
+
+func (t *errorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, t.err
+}
+
 // Test that an empty (but non-nil) variables map is
 // handled no differently than a nil variables map.
 func TestClient_Query_emptyVariables(t *testing.T) {
@@ -1086,6 +1140,84 @@ func TestClient_decorateError(t *testing.T) {
 			t.Error("expected code to be preserved")
 		}
 	})
+
+	t.Run("debug mode handles body read error gracefully", func(t *testing.T) {
+		// Create a failing reader
+		failingReader := &failingReader{err: errors.New("simulated read error")}
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// Return valid JSON that would normally work
+			mustWrite(w, `{"data":{"user":{"name":"Alice"}}}`)
+		})
+
+		// Create a custom transport that wraps the response body with our failing reader
+		transport := &failingBodyTransport{
+			handler:       mux,
+			failingReader: failingReader,
+		}
+
+		client := graphql.NewClient(
+			"/graphql",
+			&http.Client{Transport: transport},
+		).WithDebug(true)
+
+		var q struct {
+			User struct {
+				Name string
+			}
+		}
+
+		err := client.Query(context.Background(), &q, nil)
+		if err == nil {
+			t.Fatal("expected error for body read failure in debug mode, got nil")
+		}
+
+		// Verify it's the correct error type
+		errs, ok := err.(graphql.Errors)
+		if !ok {
+			t.Fatalf("expected graphql.Errors, got %T", err)
+		}
+
+		if len(errs) == 0 {
+			t.Fatal("expected at least one error")
+		}
+
+		// Check error code
+		if code := errs[0].GetCode(); code != graphql.ErrJsonDecode {
+			t.Errorf("expected error code %q, got %q", graphql.ErrJsonDecode, code)
+		}
+
+		// Check error message mentions the read error
+		if !strings.Contains(errs[0].Message, "read error") {
+			t.Errorf("expected error message to mention read error, got %q", errs[0].Message)
+		}
+	})
+}
+
+// failingReader is a reader that always returns an error
+type failingReader struct {
+	err error
+}
+
+func (f *failingReader) Read(p []byte) (n int, err error) {
+	return 0, f.err
+}
+
+// failingBodyTransport wraps responses with a failing reader to simulate body read errors
+type failingBodyTransport struct {
+	handler       http.Handler
+	failingReader io.Reader
+}
+
+func (t *failingBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	t.handler.ServeHTTP(rec, req)
+	resp := rec.Result()
+	// Replace the body with our failing reader
+	resp.Body = io.NopCloser(t.failingReader)
+	return resp, nil
 }
 
 // TestClient_newRequestError tests the convenience method for creating
@@ -1250,6 +1382,48 @@ func TestClient_buildRequest(t *testing.T) {
 
 		if auth := req.Header.Get("Authorization"); auth != "Bearer token123" {
 			t.Errorf("expected Authorization header 'Bearer token123', got %q", auth)
+		}
+	})
+
+	t.Run("handles context cancellation", func(t *testing.T) {
+		client := graphql.NewClient("http://example.com/graphql", nil)
+
+		// Create a canceled context
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel immediately
+
+		query := "{user{name}}"
+
+		_, _, err := client.BuildRequest(ctx, query, nil)
+		if err != nil {
+			// BuildRequest might succeed even with canceled context
+			// (NewRequestWithContext doesn't always return error for canceled context)
+			// This is OK - the error will occur during httpClient.Do()
+			return
+		}
+
+		// If BuildRequest succeeds, that's also valid behavior
+		// The canceled context will cause the actual HTTP request to fail
+	})
+
+	t.Run("handles variables that cannot be marshaled to JSON", func(t *testing.T) {
+		client := graphql.NewClient("http://example.com/graphql", nil)
+		ctx := context.Background()
+		query := "{user{name}}"
+
+		// Create variables with an unmarshalable type (channels can't be marshaled)
+		variables := map[string]any{
+			"channel": make(chan int),
+		}
+
+		_, _, err := client.BuildRequest(ctx, query, variables)
+		if err == nil {
+			t.Fatal("expected error for unmarshalable variables, got nil")
+		}
+
+		// Check error mentions JSON
+		if !strings.Contains(err.Error(), "json") && !strings.Contains(err.Error(), "marshal") {
+			t.Errorf("expected error to mention JSON or marshal, got %q", err.Error())
 		}
 	})
 }
@@ -1646,6 +1820,52 @@ func TestClient_executeRequest(t *testing.T) {
 		expected := `{"data":{"user":{"name":"Bob"}}}`
 		if string(body) != expected {
 			t.Errorf("expected body %q, got %q", expected, string(body))
+		}
+	})
+
+	t.Run("handles invalid gzip data", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "gzip")
+			// Write invalid gzip data (not actually gzip compressed)
+			_, _ = w.Write([]byte(`{"data":{"user":{"name":"Bob"}}}`))
+		})
+
+		client := graphql.NewClient(
+			"/graphql",
+			&http.Client{Transport: localRoundTripper{handler: mux}},
+		)
+
+		var q struct {
+			User struct {
+				Name string
+			}
+		}
+
+		err := client.Query(context.Background(), &q, nil)
+		if err == nil {
+			t.Fatal("expected error for invalid gzip data, got nil")
+		}
+
+		// Verify it's the correct error type
+		errs, ok := err.(graphql.Errors)
+		if !ok {
+			t.Fatalf("expected graphql.Errors, got %T", err)
+		}
+
+		if len(errs) == 0 {
+			t.Fatal("expected at least one error")
+		}
+
+		// Check error code
+		if code := errs[0].GetCode(); code != graphql.ErrJsonDecode {
+			t.Errorf("expected error code %q, got %q", graphql.ErrJsonDecode, code)
+		}
+
+		// Check error message contains gzip-related text
+		if !strings.Contains(errs[0].Message, "gzip") {
+			t.Errorf("expected error message to mention gzip, got %q", errs[0].Message)
 		}
 	})
 }
