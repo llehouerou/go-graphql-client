@@ -279,25 +279,26 @@ func writeArgumentType(w io.Writer, t reflect.Type, v any, value bool) {
 		return
 	}
 
-	switch t.Kind() {
-	case reflect.Slice, reflect.Array:
-		// List. E.g., "[Int]".
-		_, _ = io.WriteString(w, "[")
-		writeArgumentType(w, t.Elem(), nil, true)
-		_, _ = io.WriteString(w, "]")
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	if reflectutil.IsIntegerKind(t.Kind()) {
 		_, _ = io.WriteString(w, "Int")
-	case reflect.Float32, reflect.Float64:
-		_, _ = io.WriteString(w, "Float")
-	case reflect.Bool:
-		_, _ = io.WriteString(w, "Boolean")
-	default:
-		n := t.Name()
-		if n == "string" {
-			n = "String"
+	} else {
+		switch t.Kind() {
+		case reflect.Slice, reflect.Array:
+			// List. E.g., "[Int]".
+			_, _ = io.WriteString(w, "[")
+			writeArgumentType(w, t.Elem(), nil, true)
+			_, _ = io.WriteString(w, "]")
+		case reflect.Float32, reflect.Float64:
+			_, _ = io.WriteString(w, "Float")
+		case reflect.Bool:
+			_, _ = io.WriteString(w, "Boolean")
+		default:
+			n := t.Name()
+			if n == "string" {
+				n = "String"
+			}
+			_, _ = io.WriteString(w, n)
 		}
-		_, _ = io.WriteString(w, n)
 	}
 
 	if value {
