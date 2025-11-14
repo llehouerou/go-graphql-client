@@ -652,14 +652,21 @@ func newError(code string, err error) Error {
 	}
 }
 
-func (e Error) withRequest(req *http.Request, bodyReader io.Reader) Error {
+// withDebugInfo adds debug information to the error's internal extensions.
+// It reads the body from bodyReader and stores it along with headers under the
+// specified infoType key ("request" or "response").
+func (e Error) withDebugInfo(
+	infoType string,
+	headers http.Header,
+	bodyReader io.Reader,
+) Error {
 	internal := e.getInternalExtension()
 	bodyBytes, err := io.ReadAll(bodyReader)
 	if err != nil {
 		internal["error"] = err
 	} else {
-		internal["request"] = map[string]any{
-			"headers": req.Header,
+		internal[infoType] = map[string]any{
+			"headers": headers,
 			"body":    string(bodyBytes),
 		}
 	}
@@ -671,20 +678,12 @@ func (e Error) withRequest(req *http.Request, bodyReader io.Reader) Error {
 	return e
 }
 
-func (e Error) withResponse(res *http.Response, bodyReader io.Reader) Error {
-	internal := e.getInternalExtension()
-	bodyBytes, err := io.ReadAll(bodyReader)
-	if err != nil {
-		internal["error"] = err
-	} else {
-		internal["response"] = map[string]any{
-			"headers": res.Header,
-			"body":    string(bodyBytes),
-		}
-	}
+func (e Error) withRequest(req *http.Request, bodyReader io.Reader) Error {
+	return e.withDebugInfo("request", req.Header, bodyReader)
+}
 
-	e.Extensions["internal"] = internal
-	return e
+func (e Error) withResponse(res *http.Response, bodyReader io.Reader) Error {
+	return e.withDebugInfo("response", res.Header, bodyReader)
 }
 
 // UnmarshalGraphQL parses the JSON-encoded GraphQL response data and stores
